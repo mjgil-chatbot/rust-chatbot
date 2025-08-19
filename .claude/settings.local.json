@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo install *)",
+      "Bash(cargo test *)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "lightweight-builds",
+    "mcp-filesystem",
+    "mcp-server-commands",
+    "Context7",
+    "sequential-thinking",
+    "chrome-devtools-mcp-2",
+    "chrome-devtools",
+    "puppeteer",
+    "bash",
+    "chatbot-memory"
+  ]
+}
