@@ -1,0 +1,107 @@
+[package]
+license = "0BSD"
+name = "rust-chatbot"
+version = "0.1.0"
+edition = "2021"
+default-run = "rust-chatbot"
+
+[lib]
+name = "chatbot_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rust-chatbot"
+path = "src/main.rs"
+
+[[bin]]
+name = "rcc"
+path = "src/bin/rcc.rs"
+
+[[bin]]
+name = "chatbot-worker"
+path = "src/bin/chatbot_worker.rs"
+
+[[bin]]
+name = "chatbot-ctl"
+path = "src/bin/chatbot_ctl.rs"
+
+[[bin]]
+name = "chatbot-broker"
+path = "src/bin/chatbot_broker.rs"
+
+[[bin]]
+name = "chatbot-memory-mcp"
+path = "src/bin/chatbot_memory_mcp.rs"
+
+[[bin]]
+name = "chatbot-session-mcp"
+path = "src/bin/chatbot_session_mcp.rs"
+
+[[bin]]
+name = "chatbot-history-auditor-mcp"
+path = "src/bin/chatbot_history_auditor_mcp.rs"
+
+[dependencies]
+chatbot_ui = { path = "../chatbot-ui" }
+chatbot_worker_core = { package = "chatbot-worker", path = "../chatbot-worker" }
+ai-providers = { path = "../ai-providers" }
+ai-history-core = { path = "../chatbot-history/crates/ai-history-core" }
+ai-history-snapshot = { path = "../chatbot-history/crates/ai-history-snapshot" }
+ai-history-store = { path = "../chatbot-history/crates/ai-history-store" }
+ai-history-ui-model = { path = "../chatbot-history/crates/ai-history-ui-model" }
+history-auditor-core = { path = "../history-auditor/crates/history-auditor-core" }
+history-auditor-mcp = { path = "../history-auditor/crates/history-auditor-mcp" }
+tmc = { package = "the-markdown-commons", path = "../the-markdown-commons", features = ["egui"] }
+eframe = "0.29.1"
+egui = "0.29.1"
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+dirs = "6.0"
+pulldown-cmark = "0.13"
+egui_extras = { version = "0.29.1", features = ["syntect", "all_loaders"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+rust-debug = { git = "https://github.com/mjgil-rust/rust-debug", rev = "9038be5", features = ["tracing-integration"] }
+memmap2 = "0.9"
+libc = "0.2"
+zerocopy = { version = "0.8", features = ["derive"] }
+fs2 = "0.4"
+rmcp = { version = "1.2.0", features = ["server", "transport-io", "macros", "schemars"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
+schemars = "1.0"
+toml = "1.0"
+once_cell = "1.19"
+rfd = "0.17.2"
+url = "2.5"
+raw-window-handle = { version = "0.6.2", features = ["std"] }
+
+[profile.release]
+opt-level = 1
+lto = false
+codegen-units = 16
+incremental = true
+
+[dev-dependencies]
+cap = "0.1.2"
+tempfile = "3"
+
+
+[profile.release.package."*"]
+opt-level = 3
+
+[profile.ship]
+inherits = "release"
+opt-level = 3
+lto = true
+codegen-units = 1
+incremental = false
+
+# Coverage profile — used by `cargo llvm-cov`
+[profile.coverage]
+inherits = "dev"
+opt-level = 0
+debug = 1
+incremental = false
