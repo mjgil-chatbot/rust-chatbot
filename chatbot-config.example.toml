@@ -1,0 +1,163 @@
+# =============================================================================
+# rust-chatbot runtime configuration
+# =============================================================================
+#
+# Load order (first found wins):
+#   1. $RUST_CHATBOT_CONFIG_PATH                (env override; exclusive when set)
+#   2. <repo-root>/chatbot-config.toml          (repo-local, committed)
+#   3. ~/.rust-chatbot/config.toml              (user-specific, not committed)
+#
+# When RUST_CHATBOT_CONFIG_PATH is set it is the EXCLUSIVE search entry —
+# the repo-root and home paths are skipped, so a missing file at the override
+# path produces an all-defaults config rather than silently falling through.
+# Used by scripts/auto-ui-test.sh to pin the test fixture.
+#
+# All fields are optional. Missing fields use the hardcoded defaults from
+# `../chatbot-worker/src/config/` plus the provider catalog in
+# `../chatbot-worker/src/provider_catalog.rs`, so existing callers are never
+# forced to change.
+#
+# This file is the authoritative reference for supported knobs.  To create a
+# working config for your setup, copy this to the repo root (or ~/.rust-chatbot/)
+# and adjust the values.
+#
+# =============================================================================
+
+# --- Provider knobs ---------------------------------------------------------
+# These are per-provider runtime overrides. They take precedence over the
+# built-in defaults in `src/config/` (for example `CODEX_REASONING_EFFORT`).
+
+[provider]
+
+# Default model provider when none is specified.
+# Accepted values: "minimax" | "codex" | "kimi"
+# Default: "codex"
+# default_provider = "codex"
+
+# Codex: reasoning effort hint passed to the CLI.
+# Accepted values: "low" | "medium" | "high" | "xhigh"
+# Default (runtime): "high"
+# codex_reasoning_effort = "high"
+
+# MiniMax: reasoning effort hint passed to the CLI.
+# Accepted values: "low" | "medium" | "high" | "xhigh"
+# Default (runtime): "xhigh"
+# minimax_reasoning_effort = "xhigh"
+
+# Codex: sandbox permission level.
+# Accepted values: "read-only" | "workspace-write" | "danger-full-access"
+# Default (compile-time): "danger-full-access"
+# codex_sandbox_mode = "danger-full-access"
+
+# Allow API-key billing (costs money) instead of subscription-only mode.
+# When false (default), the app verifies subscription credentials before use.
+# Default (compile-time): false
+# allow_api_billing = false
+
+# Maximum concurrent provider calls across all tasks.
+# Default: 4
+# max_concurrency = 4
+
+
+# --- UI layout --------------------------------------------------------------
+
+[ui]
+
+# Default window dimensions in pixels.
+# Default: 1000 x 600
+# window_width  = 1000.0
+# window_height = 600.0
+
+# Minimum window dimensions.  Keeps the side panel + chat pane visible.
+# Default: 980 x 300
+# min_window_width  = 980.0
+# min_window_height = 300.0
+
+# Side panel (session list) default and minimum width.
+# Default: 200 / 100
+# side_panel_width      = 200.0
+# side_panel_min_width  = 100.0
+
+# Maximum width for rendered markdown messages (keeps lines readable on wide
+# monitors).
+# Default: 700
+# message_max_width = 700.0
+
+
+# --- Workspace memory -------------------------------------------------------
+# Controls the MemMachine-backed workspace memory layer used for prompt injection.
+
+[memory]
+
+# Enable/disable workspace-scoped memory retrieval entirely.  When false, the
+# chatbot behaves as if memory is not available (no retrieval, no storage).
+# Default (compile-time): true
+# enable_workspace_memory = true
+
+# Base URL for the MemMachine server.
+# Default: http://127.0.0.1:8080
+# memmachine_base_url = "http://127.0.0.1:8080"
+
+# Organization identifier used for workspace-scoped MemMachine projects.
+# Default: rust-chatbot
+# memmachine_org_id = "rust-chatbot"
+
+# Number of top-ranked memories to inject into the system prompt context.
+# Default: 8
+# memory_top_k = 8
+
+
+# --- Coordination / autonomous runs ----------------------------------------
+# These knobs govern the coordination engine used by `chatbot-worker autonomous`
+# and the GUI autonomous-run dialog.
+
+[coordination]
+
+# Duration (seconds) a task claim is held before expiring if no heartbeat arrives.
+# Default: 30
+# task_lease_secs = 30
+
+# Interval (seconds) between worker heartbeat pings while a task is running.
+# Default: 5
+# task_heartbeat_secs = 5
+
+# Default maximum attempts per task before declaring it failed.
+# Default: 3
+# task_max_attempts = 3
+
+# Default maximum number of concurrent agents in an autonomous run.
+# Default: 5
+# max_agents = 5
+
+# Default maximum planning/coordination iterations per run.
+# Default: 10
+# max_iterations = 18446744073709551615  # usize::MAX, unlimited
+
+# Whether autonomous tasks are permitted to request file write_scope.
+# Default: true
+# allow_write_tasks = true
+
+# Whether edits produced by autonomous tasks must pass human review before
+# being applied to the working tree.
+# Default: true
+# require_review_before_apply = true
+
+# Path to the canonical design doc used as the shared design artifact for
+# autonomous design-consensus workflows.  Relative to workspace root.
+# Default: "docs/autonomous/design-doc.md"
+# design_doc_path = "docs/autonomous/design-doc.md"
+
+# Canonical path for the autonomous design doc (used in AUTONOMOUS_DESIGN_DOC_PATH).
+# Default: "docs/autonomous/design-doc.md"
+# autonomous_design_doc_path = "docs/autonomous/design-doc.md"
+
+# Container image used when an autonomous run opts into the `runsc VM` execution mode.
+# The bundled image is expected to contain the supported provider CLIs (`codex`, `kimi`);
+# MiniMax reuses the Claude-style CLI transport inside that image.
+# Default: "rust-chatbot-autonomous-runsc:latest"
+# autonomous_runsc_image = "rust-chatbot-autonomous-runsc:latest"
+
+# Maximum number of background sub-tasks the dispatcher fans out to in parallel.
+# Each sub-task consumes one provider call slot (see provider.max_concurrency).
+# Default: 4
+# background_max_concurrent = 4

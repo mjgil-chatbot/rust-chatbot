@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "pre-commit: running cargo fmt --all"
+cargo fmt --all
+
+if ! git diff --quiet -- '*.rs'; then
+  echo "pre-commit: restaging formatted Rust files"
+  git add --update -- '*.rs'
+fi
+
+echo "pre-commit: running ui-thread contract verifier"
+python3 "$repo_root/scripts/verify_ui_thread_contract.py"
+
+echo "pre-commit: running ui-spec contract verifier"
+python3 "$repo_root/scripts/verify_ui_spec_contract.py"
+
+echo "pre-commit: running session lifecycle contract verifier"
+python3 "$repo_root/scripts/verify_session_lifecycle_contract.py"
+
+echo "pre-commit: running spool/session contract verifier"
+python3 "$repo_root/scripts/verify_spool_session_contract.py"
+
+echo "pre-commit: running history/checkpoint contract verifier"
+python3 "$repo_root/scripts/verify_history_contract.py"
+
+echo "pre-commit: running memory contract verifier"
+python3 "$repo_root/scripts/verify_memory_contract.py"
+
+echo "pre-commit: running engineering gate"
+"$repo_root/scripts/verify-engineering-gate.sh"

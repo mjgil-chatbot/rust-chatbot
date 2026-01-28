@@ -1,0 +1,31 @@
+target
+.claude-desktop
+__pycache__
+tmp
+.rag_model_cache/
+.minimax/*
+!.minimax/settings.json
+**/*.key
+.qwen/*
+!.qwen/settings.json
+.openrouter/*
+.gemma/*
+lcov.info
+coverage/
+.glm/*
+.gemini/*
+!.gemini/README.md
+!.gemini/settings.json
+.xiaomi/*
+!.xiaomi/settings.json
+.nvidia/*
+.ai-history
+
+# Generated local provider configuration; keep the portable example tracked.
+/.mcp.json
+/.codex/config.toml
+/.codex/mcp-coordinator-upstream.json
+/.claude/claude-desktop.config.mirror.json
+
+# Provider authentication stays outside source control.
+/.codex/auth.json
