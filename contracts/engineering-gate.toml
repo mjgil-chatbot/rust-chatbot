@@ -1,0 +1,263 @@
+version = 1
+repo_id = "rust-chatbot"
+repo_root_names = ["rust-chatbot"]
+
+[[contract]]
+id = "engineering_docs"
+description = "Documentation and verification mapping changes must keep the engineering docs and gate wiring coherent."
+trigger_globs = [
+  "docs/README.md",
+  "docs/verification.md",
+  "docs/architecture/engineering-assessment.md",
+  "docs/architecture/chatbot-history-integration.md",
+  "docs/architecture/memmachine-integration.md",
+  "docs/architecture/ui-lean-integration-map.md",
+  "docs/architecture/ui-lean-send-draft-stream-spec.md",
+  "docs/architecture/session-worker-lifecycle-spec.md",
+  "docs/architecture/spool-session-contract-versioning.md",
+  "docs/architecture/property-test-plan.md",
+  "docs/architecture/state-module-segmentation.md",
+  "docs/architecture/evidence-gate.md",
+  "tests/test_engineering_assessment_docs.py",
+  "tests/test_forge_plaintext_docs.py",
+  "contracts/engineering-gate.toml",
+  ".github/workflows/engineering-gate.yml",
+  ".githooks/pre-commit",
+  "scripts/verify-engineering-gate.sh",
+  "scripts/verify_engineering_gate.py",
+  "scripts/verify_ui_thread_contract.py",
+  "scripts/verify_ui_spec_contract.py",
+  "scripts/verify_session_lifecycle_contract.py",
+  "scripts/verify_spool_session_contract.py",
+  "scripts/verify_history_contract.py",
+  "scripts/verify_memory_contract.py",
+  "scripts/verify-ui-spec-regressions.sh",
+  "scripts/verify-session-lifecycle-regressions.sh",
+  "scripts/verify-spool-session-regressions.sh",
+  "scripts/verify-history-regressions.sh",
+  "scripts/verify-memory-regressions.sh",
+  "tests/test_ui_thread_contract.py",
+  "tests/test_ui_spec_contract.py",
+  "tests/test_session_lifecycle_contract.py",
+  "tests/test_spool_session_contract.py",
+  "tests/test_history_contract.py",
+  "tests/test_memory_contract.py",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "python3 -m unittest tests.test_forge_plaintext_docs",
+  "python3 -m unittest tests.test_engineering_gate",
+]
+
+[[contract]]
+id = "ui_thread_contract"
+description = "UI-thread frame-path changes must keep blocking work off the UI thread and keep the ui-lean proof linkage green."
+trigger_globs = [
+  "src/app/ui/*.rs",
+  "src/app/ui/**/*.rs",
+  "src/app/state/messaging.rs",
+  "src/app/state/persistence.rs",
+  ".githooks/pre-commit",
+  "scripts/verify_ui_thread_contract.py",
+  "tests/test_ui_thread_contract.py",
+]
+required_any_staged = [
+  "docs/architecture/ui-lean-integration-map.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "python3 -m unittest tests.test_ui_thread_contract",
+  "python3 scripts/verify_ui_thread_contract.py",
+]
+
+[[contract]]
+id = "ui_send_draft_stream_contract"
+description = "The bounded send/draft/stream ui-spec must stay backed by its focused regression bundle and contract verifier."
+trigger_globs = [
+  "src/app/state.rs",
+  "src/app/state/messaging.rs",
+  "src/app/state/session_runtime.rs",
+  "src/app/state/ui_io.rs",
+  "src/app/state/ui_spec_lifecycle_tests.rs",
+  "src/app/ui/message_list.rs",
+  "src/app/ui/message_list/tests/*.rs",
+  "src/app/ui/message_list/tests/**/*.rs",
+  "docs/architecture/ui-lean-send-draft-stream-spec.md",
+  "docs/architecture/ui-lean-integration-map.md",
+  "docs/verification.md",
+  ".githooks/pre-commit",
+  "scripts/verify_ui_spec_contract.py",
+  "scripts/verify-ui-spec-regressions.sh",
+  "tests/test_ui_spec_contract.py",
+]
+required_any_staged = [
+  "docs/architecture/ui-lean-send-draft-stream-spec.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "python3 -m unittest tests.test_ui_spec_contract",
+  "python3 scripts/verify_ui_spec_contract.py",
+  "bash scripts/verify-ui-spec-regressions.sh",
+]
+
+[[contract]]
+id = "session_worker_lifecycle"
+description = "Session and UI state machine changes must update the lifecycle contract or verification mapping."
+trigger_globs = [
+  "src/app/state.rs",
+  "src/app/state/*.rs",
+  "src/app/state/**/*.rs",
+  "src/app/ui/message_list.rs",
+  "src/app/ui/message_list/tests/*.rs",
+  "src/app/ui/message_list/tests/**/*.rs",
+  "docs/architecture/session-worker-lifecycle-spec.md",
+  "scripts/verify_session_lifecycle_contract.py",
+  "scripts/verify-session-lifecycle-regressions.sh",
+  "tests/test_session_lifecycle_contract.py",
+]
+required_any_staged = [
+  "docs/architecture/session-worker-lifecycle-spec.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "python3 -m unittest tests.test_session_lifecycle_contract",
+  "python3 scripts/verify_session_lifecycle_contract.py",
+  "bash scripts/verify-session-lifecycle-regressions.sh",
+]
+
+[[contract]]
+id = "spool_session_contract"
+description = "Spool and terminal reconciliation changes must update contract/versioning docs or verification mapping."
+trigger_globs = [
+  "docs/architecture/worker-spool.md",
+  "docs/architecture/spool-session-contract-versioning.md",
+  "src/session_mcp/service.rs",
+  "src/bin/chatbot_ctl/**/*.rs",
+  "src/app/state/sync.rs",
+  "src/app/state/sync_slots.rs",
+  "src/app/state/helpers_impl.rs",
+  "src/app/state/session_runtime_terminal_persistence_tests.rs",
+  "scripts/verify_spool_session_contract.py",
+  "scripts/verify-spool-session-regressions.sh",
+  "tests/test_spool_session_contract.py",
+  "tests/mock_provider_server.rs",
+]
+required_any_staged = [
+  "docs/architecture/spool-session-contract-versioning.md",
+  "docs/architecture/worker-spool.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "python3 -m unittest tests.test_spool_session_contract",
+  "python3 scripts/verify_spool_session_contract.py",
+  "bash scripts/verify-spool-session-regressions.sh",
+]
+
+[[contract]]
+id = "background_flow_runtime"
+description = "Background worker/UI replay changes must pass the focused release regression bundle."
+trigger_globs = [
+  "src/app/state.rs",
+  "src/app/state/*.rs",
+  "src/app/state/**/*.rs",
+  "src/app/ui/workspace*.rs",
+  "src/app/ui/workspace/**/*.rs",
+  "scripts/auto-ui-test-background-flow.sh",
+]
+required_any_staged = [
+  "docs/architecture/session-worker-lifecycle-spec.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "bash scripts/auto-ui-test-background-flow.sh",
+]
+
+[[contract]]
+id = "history_checkpoint_contract"
+description = "History sync, checkpoint capture, and exact-store restore changes must keep their local contract and focused regression bundle aligned."
+trigger_globs = [
+  "docs/architecture/chatbot-history-integration.md",
+  "src/app/state/history.rs",
+  "src/app/state/history_*.rs",
+  "src/app/state/history/**/*.rs",
+  "src/app/ui/history_panel.rs",
+  "scripts/verify_history_contract.py",
+  "scripts/verify-history-regressions.sh",
+  "tests/test_history_contract.py",
+]
+required_any_staged = [
+  "docs/architecture/chatbot-history-integration.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "python3 -m unittest tests.test_history_contract",
+  "python3 scripts/verify_history_contract.py",
+  "bash scripts/verify-history-regressions.sh",
+]
+
+[[contract]]
+id = "memory_contract"
+description = "Workspace memory retrieval, audit, and MCP inspection changes must keep their local contract and focused regression bundle aligned."
+trigger_globs = [
+  "docs/architecture/memmachine-integration.md",
+  "src/memory_mcp/*.rs",
+  "src/memory_mcp/**/*.rs",
+  "src/bin/chatbot_memory_mcp.rs",
+  "scripts/verify_memory_contract.py",
+  "scripts/verify-memory-regressions.sh",
+  "tests/test_memory_contract.py",
+]
+required_any_staged = [
+  "docs/architecture/memmachine-integration.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "python3 -m unittest tests.test_memory_contract",
+  "python3 scripts/verify_memory_contract.py",
+  "bash scripts/verify-memory-regressions.sh",
+]
+
+[[contract]]
+id = "prompt_debug_plaintext_contract"
+description = "Prompt-debug plaintext rendering changes must keep the checked assert-only artifact pair valid."
+trigger_globs = [
+  "scripts/auto-ui-assertions.py",
+  "scripts/auto-ui-test-prompt-debug.sh",
+  "tests/test_auto_ui_assertions.py",
+  "tests/fixtures/prompt_debug_assert/**",
+]
+required_any_staged = [
+  "docs/verification.md",
+  "docs/architecture/evidence-gate.md",
+]
+commands = [
+  "python3 -m unittest tests.test_auto_ui_assertions",
+  'bash scripts/auto-ui-test-prompt-debug.sh --assert-only --output-dir tests/fixtures/prompt_debug_assert --session-json tests/fixtures/prompt_debug_assert/session.json --require-substring "fn main() {}" --require-tool-transcript-count 2 --require-tool-transcript-substring pwd --forbid-tool-transcript-substring "| Shell"',
+]
+
+[[contract]]
+id = "sibling_repo_boundary"
+description = "Cross-repo worker boundary changes must keep sibling cargo surfaces checkable from the owning repo."
+trigger_globs = [
+  "src/bin/chatbot_ctl/**/*.rs",
+  "src/session_mcp/**/*.rs",
+  "src/app/state/helpers_impl.rs",
+  "docs/architecture/worker-spool.md",
+  "docs/architecture/spool-session-contract-versioning.md",
+]
+required_any_staged = [
+  "docs/architecture/worker-spool.md",
+  "docs/architecture/spool-session-contract-versioning.md",
+  "docs/verification.md",
+]
+commands = [
+  "python3 -m unittest tests.test_engineering_assessment_docs",
+  "bash ../chatbot-worker/scripts/verify-sibling-builds.sh --check --release --repo chatbot-worker --repo __DESKTOP_REPO__",
+]
