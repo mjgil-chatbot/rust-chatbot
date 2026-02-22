@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "chatbot-memory": {
+      "command": "chatbot-memory-mcp",
+      "env": {
+        "CHATBOT_MEMORY_MCP_ALLOWED_ROOTS": "."
+      }
+    }
+  }
+}
