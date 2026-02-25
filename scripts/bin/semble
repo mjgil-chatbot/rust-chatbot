@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SEMBLE_ROOT="${RUST_CHATBOT_SEMBLE_RS_ROOT:-$HOME/git/semble-rs/semble-rs-work}"
+SEMBLE_BIN="$SEMBLE_ROOT/target/release/semble"
+SEMBLE_MANIFEST="$SEMBLE_ROOT/Cargo.toml"
+SEMBLE_LOCKFILE="$SEMBLE_ROOT/Cargo.lock"
+
+semble_wrapper_has_newer_source() {
+    local path
+
+    for path in "$SEMBLE_MANIFEST" "$SEMBLE_LOCKFILE" "$SEMBLE_ROOT/src" "$SEMBLE_ROOT/tests"; do
+        if [ -e "$path" ] && find "$path" -type f -newer "$SEMBLE_BIN" -print -quit 2>/dev/null | grep -q .; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if [ -x "$SEMBLE_BIN" ] && ! semble_wrapper_has_newer_source; then
+    exec "$SEMBLE_BIN" "$@"
+fi
+
+exec cargo run --release --manifest-path "$SEMBLE_MANIFEST" --bin semble -- "$@"
