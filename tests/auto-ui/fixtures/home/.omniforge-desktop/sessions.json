@@ -1,0 +1,12 @@
+{
+  "sessions": {
+    "fixture-omniforge-prompt": {
+      "id": "fixture-omniforge-prompt",
+      "name": "omniforge-prompt",
+      "created_at": "2026-05-05T06:00:00Z",
+      "updated_at": "2026-05-05T06:00:00Z",
+      "message_count": 0,
+      "hidden": false
+    }
+  }
+}

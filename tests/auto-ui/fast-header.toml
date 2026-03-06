@@ -1,0 +1,20 @@
+target = "rust_chatbot"
+scenario = "header_debug"
+
+[app]
+root = "."
+provider = "codex"
+session_name = "pl-update"
+
+[window]
+widths = [900]
+height = 700
+keep_front = false
+
+[capture]
+header_height = 140
+
+[runtime]
+window_timeout = 8.0
+trace_timeout = 4.0
+settle = 0.5
