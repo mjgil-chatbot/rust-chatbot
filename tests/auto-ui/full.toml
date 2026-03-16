@@ -1,0 +1,18 @@
+target = "rust_chatbot"
+scenario = "debug"
+
+[app]
+root = "."
+provider = "codex"
+max_sessions = 8
+
+[window]
+widths = [520, 900, 1000]
+height = 900
+launch = true
+keep_front = false
+
+[runtime]
+window_timeout = 15.0
+trace_timeout = 5.0
+settle = 0.7

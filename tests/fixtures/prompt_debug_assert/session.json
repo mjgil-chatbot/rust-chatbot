@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "is_user": true,
+      "content": ":muse create a short rollout plan"
+    },
+    {
+      "is_user": false,
+      "content": "● [00:00:01] Execute [/bin/bash] pwd\n● [00:00:02] Execute [/bin/bash] git status --short\n+-------+--------+\n| Phase | Focus  |\n+-------+--------+\nfn main() {}"
+    }
+  ]
+}

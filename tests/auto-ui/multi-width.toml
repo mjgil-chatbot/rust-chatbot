@@ -1,0 +1,24 @@
+target = "rust_chatbot"
+scenario = "debug"
+
+# Multi-width run for the height cache assertions: each session is rendered at
+# 520, 900, and 1000 px. The height cache must repopulate per width key
+# (height_cache_width_key in src/data.rs); the assertion script checks that
+# height_cache JSONs land on disk and that first_rect_height differs when
+# message wraps differ between widths.
+
+[app]
+root = "."
+provider = "codex"
+max_sessions = 8
+
+[window]
+widths = [520, 900, 1000]
+height = 700
+launch = true
+keep_front = false
+
+[runtime]
+window_timeout = 8.0
+trace_timeout = 4.0
+settle = 0.5

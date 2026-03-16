@@ -1,0 +1,19 @@
+{
+  "status": "ok",
+  "scenario": "prompt_debug",
+  "artifacts": [
+    {
+      "kind": "window_screenshot",
+      "path": "tests/fixtures/prompt_debug_assert/window.png"
+    }
+  ],
+  "measurements": [
+    {
+      "ai_response_end": {
+        "status": "done"
+      },
+      "last_markdown_row": null
+    }
+  ],
+  "details": {}
+}

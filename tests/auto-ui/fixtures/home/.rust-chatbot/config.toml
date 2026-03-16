@@ -1,0 +1,16 @@
+# Minimal fixture config for auto-ui smoke tests.
+# scripts/auto-ui-test.sh pins this file via RUST_CHATBOT_CONFIG_PATH, so it
+# wins over any chatbot-config.toml that may be present at the repo root.
+
+[provider]
+default_provider = "codex"
+allow_api_billing = false
+
+[ui]
+
+[memory]
+enable_workspace_memory = false
+
+[background]
+allow_write_tasks = false
+require_review_before_apply = true
