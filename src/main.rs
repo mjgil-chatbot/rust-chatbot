@@ -14,5 +14,14 @@
 //! - `data` - Data models and persistence
 //! - `markdown` - Markdown rendering with table support
 
+use std::sync::Arc;
+use eframe::egui;
+pub use chatbot_lib::config;
+pub use chatbot_lib::data;
+pub use chatbot_lib::model;
+pub use chatbot_lib::worker;
 mod app;
+mod socket;
+use model::ModelProvider;
+use rust_debug::tracing::{error, info};
 fn main() {}

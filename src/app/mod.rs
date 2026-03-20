@@ -11,3 +11,4 @@
 //!   - `side_panel` - Session list
 
 pub mod state;
+pub(crate) mod workspace_picker;
