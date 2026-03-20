@@ -14,4 +14,5 @@
 //! - `data` - Data models and persistence
 //! - `markdown` - Markdown rendering with table support
 
+mod app;
 fn main() {}
