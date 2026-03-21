@@ -25,6 +25,7 @@ pub use chatbot_lib::summary;
 pub use chatbot_lib::sync;
 pub use chatbot_lib::worker;
 mod app;
+mod forge_loop;
 mod markdown;
 mod socket;
 use model::ModelProvider;
