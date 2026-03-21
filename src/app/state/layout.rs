@@ -1,0 +1,31 @@
+pub struct LayoutState {
+    pub input_text: String,
+    pub should_focus_input: bool,
+    pub show_json_summary: bool,
+    pub current_json_summary_preview: Option<JsonSummaryPreview>,
+    pub current_json_summary_full: Option<JsonSummary>,
+    pub pending_layout_log: bool,
+    pub layout_log_rx: Option<mpsc::Receiver<crate::app::ui::layout_log::LayoutLogCompletion>>,
+    pub markdown_cache: MarkdownCache,
+    pub copy_feedback: HashMap<i64, std::time::Instant>,
+    pub message_row_heights: Vec<f32>,
+    pub message_row_heights_session_id: Option<String>,
+    pub message_row_heights_width: f32,
+    pub session_height_cache: HashMap<String, SessionHeightCache>,
+    pub layout_log_feedback: Option<LayoutLogFeedback>,
+    pub last_auto_ui_debug_signature: Option<String>,
+    pub last_auto_ui_sidebar_debug_signature: Option<String>,
+    pub message_scroll_offset_override: Option<f32>,
+    pub message_scroll_offset_session_id: Option<String>,
+    pub deferred_message_scroll_adjustment: f32,
+    pub deferred_message_scroll_adjustment_session_id: Option<String>,
+    pub pending_height_cache_save: Option<String>,
+    pub height_cache_scan: Option<HeightCacheScan>,
+    pub status_feedback: Option<UiStatusFeedback>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct UiStatusFeedback {
+    pub(crate) at: Instant,
+    pub(crate) is_error: bool,
+    pub(crate) message: String,
+}

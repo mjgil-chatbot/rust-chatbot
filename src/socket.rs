@@ -50,3 +50,8 @@ pub enum SyncEvent {
     Disconnected,
     Reconnected,
 }
+/// Handle held by the UI thread to send messages and receive events.
+#[derive(Clone)]
+pub struct SocketHandle {
+    writer: Arc<Mutex<Option<UnixStream>>>,
+}

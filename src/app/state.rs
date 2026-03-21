@@ -12,18 +12,25 @@ use std::thread;
 use std::time::{Duration, Instant};
 use anyhow::Result;
 use rust_debug::tracing::{debug, error, info, warn};
-use crate::data::ChatSession;
-use crate::data::DataManager;
-use crate::data::SessionHeightCache;
-use crate::data::SessionInfo;
+use crate::config;
+use crate::data::{ChatMessage, ChatSession, DataManager, SessionHeightCache, SessionInfo};
+use crate::markdown::MarkdownCache;
 use crate::model::ModelProvider;
+use crate::socket::SocketHandle;
 use crate::socket::SyncEvent;
+use crate::summary::{JsonSummary, JsonSummaryPreview};
+use crate::sync::SyncShm;
 use crate::worker;
 use crate::worker::WorkerResult;
+#[path = "state/background_timing.rs"]
+mod background_timing;
+#[path = "state/history_maintenance.rs"]
+mod history_maintenance;
 #[path = "state/history_repo_capture.rs"]
 mod history_repo_capture;
 #[path = "state/ui_io.rs"]
 mod ui_io;
+pub(crate) use self::history_maintenance::human_bytes;
 use ui_io::UiIoResult;
 use ui_io::UiIoSaveOperation;
 use ui_io::UiIoState;
@@ -58,6 +65,27 @@ pub(crate) enum AppUiAction {
         session_id: String,
         model_id: String,
     },
+}
+/// Main application state
+pub struct AppState {
+    pub session: SessionState,
+    pub worker: AppWorkerState,
+    pub layout: LayoutState,
+
+    /// Shared memory handle for cross-instance sync
+    pub sync_shm: Option<SyncShm>,
+    /// Socket handle for real-time cross-instance stream sync.
+    pub sync_socket: SocketHandle,
+    /// Receiver for sync events from the socket reader thread.
+    pub sync_events: mpsc::Receiver<SyncEvent>,
+    /// Instance number (e.g. 1, 2, 3) for multi-instance identification
+    #[allow(dead_code)]
+    pub instance_number: Option<u32>,
+    /// Wrapper for native window handle for modal dialog parent
+    #[cfg(not(target_arch = "wasm32"))]
+    pub dialog_parent: Option<DialogParent>,
+    #[cfg(target_arch = "wasm32")]
+    pub dialog_parent: Option<()>,
 }
 /// Wrapper for native window handle that implements HasWindowHandle + HasDisplayHandle
 /// for use with rfd::FileDialog::set_parent()
@@ -104,9 +132,24 @@ pub(crate) struct DiscoveredWorkerJob {
     pub(crate) result: Option<WorkerResult>,
 }
 #[derive(Debug)]
+pub(crate) struct PolledWorkerJob {
+    pub(crate) job: worker::WorkerJobSnapshot,
+    pub(crate) worker_pid_alive: bool,
+    pub(crate) response: Option<String>,
+    pub(crate) result: WorkerResult,
+    pub(crate) worker_events: Vec<crate::stream::StreamEvent>,
+    pub(crate) worker_events_offset: u64,
+}
+#[derive(Debug)]
 pub(crate) struct OrphanedLocalWorker {
     pub(crate) chat_id: String,
     pub(crate) error_message: String,
+}
+#[derive(Debug)]
+pub(crate) struct WorkerPollSnapshot {
+    pub(crate) active_chat_ids: HashSet<String>,
+    pub(crate) jobs: Vec<PolledWorkerJob>,
+    pub(crate) orphaned_local_workers: Vec<OrphanedLocalWorker>,
 }
 pub(crate) struct SessionSearchResult {
     pub(crate) query: String,
@@ -225,3 +268,299 @@ impl SessionState {
             event_queue: VecDeque::new(),
         }
     }}
+impl AppWorkerState {
+    fn new() -> Self {
+        Self {
+            processing_chat_ids: HashSet::new(),
+            local_processing_chat_ids: HashSet::new(),
+            local_worker_pids: HashMap::new(),
+            response_cache_by_chat: HashMap::new(),
+            pending_worker_pids: HashMap::new(),
+            response_started_chat_ids: HashSet::new(),
+            pending_delete_chat_ids: HashSet::new(),
+            forge_loop_active_chat_ids: HashSet::new(),
+            forge_loop_continue_ids: HashMap::new(),
+            forge_loop_acknowledged_ids: HashMap::new(),
+            last_seen_worker_seq: HashMap::new(),
+            last_seen_worker_events: HashMap::new(),
+            last_worker_poll: Instant::now(),
+            worker_poll_started_at: None,
+            worker_discovery_rx: None,
+            worker_poll_rx: None,
+            locally_finalized_chat_ids: HashSet::new(),
+        }
+    }}
+impl LayoutState {
+    fn new() -> Self {
+        Self {
+            input_text: String::new(),
+            should_focus_input: !config::auto_ui_launch_background_requested(),
+            show_json_summary: false,
+            current_json_summary_preview: None,
+            current_json_summary_full: None,
+            pending_layout_log: false,
+            layout_log_rx: None,
+            markdown_cache: MarkdownCache::default(),
+            copy_feedback: HashMap::new(),
+            message_row_heights: Vec::new(),
+            message_row_heights_session_id: None,
+            message_row_heights_width: 0.0,
+            session_height_cache: HashMap::new(),
+            layout_log_feedback: None,
+            last_auto_ui_debug_signature: None,
+            last_auto_ui_sidebar_debug_signature: None,
+            message_scroll_offset_override: None,
+            message_scroll_offset_session_id: None,
+            deferred_message_scroll_adjustment: 0.0,
+            deferred_message_scroll_adjustment_session_id: None,
+            pending_height_cache_save: None,
+            height_cache_scan: None,
+            status_feedback: None,
+        }
+    }}
+impl AppState {
+    fn next_height_cache_load_request_id(&mut self) -> u64 {
+        self.session.latest_height_cache_load_request_id = self
+            .session
+            .latest_height_cache_load_request_id
+            .saturating_add(1);
+        self.session.latest_height_cache_load_request_id
+    }}
+impl AppState {
+    fn next_mcp_config_request_id(&mut self) -> u64 {
+        self.session.latest_mcp_config_request_id =
+            self.session.latest_mcp_config_request_id.saturating_add(1);
+        self.session.latest_mcp_config_request_id
+    }}
+impl AppState {
+    pub(crate) fn refresh_mcp_config_status_in_background(&mut self) {
+        let provider = self.session.provider;
+        let mcp_json_path = provider_mcp_json_path(provider);
+        let cache_key = format!("{}:{}", provider.as_str(), mcp_json_path.display());
+        if self.session.mcp_config_cache_key.as_deref() == Some(cache_key.as_str())
+            && self.session.mcp_config_status_rx.is_some()
+        {
+            return;
+        }
+        if self.session.mcp_config_cache_key.as_deref() == Some(cache_key.as_str())
+            && self.session.fff_mcp_server_explicitly_configured.is_some()
+        {
+            return;
+        }
+
+        #[cfg(test)]
+        {
+            self.session.mcp_config_cache_key = Some(cache_key);
+            self.session.fff_mcp_server_explicitly_configured = Some(
+                read_explicit_mcp_server_configured(provider, &mcp_json_path, "fff"),
+            );
+            self.session.mcp_config_status_rx = None;
+            self.session.mcp_config_status_started_at = None;
+            return;
+        }
+
+        #[cfg(not(test))]
+        {
+            let request_id = self.next_mcp_config_request_id();
+            let repaint_ctx = self.session.ui_io.repaint_ctx.clone();
+            let (tx, rx) = mpsc::channel();
+            self.session.mcp_config_cache_key = Some(cache_key.clone());
+            self.session.fff_mcp_server_explicitly_configured = None;
+            self.session.mcp_config_status_started_at = Some(Instant::now());
+            self.session.mcp_config_status_rx = Some(rx);
+
+            thread::spawn(move || {
+                let fff_explicitly_configured =
+                    read_explicit_mcp_server_configured(provider, &mcp_json_path, "fff");
+                let _ = tx.send(McpConfigStatusResult {
+                    request_id,
+                    cache_key,
+                    fff_explicitly_configured,
+                });
+                if let Some(ctx) = repaint_ctx {
+                    ctx.request_repaint();
+                }
+            });
+        }
+    }}
+impl AppState {
+    pub(crate) fn spawn_height_cache_load_for_session(&mut self, session_id: String) {
+        let Some(data_manager) = self.session.data_manager.clone() else {
+            return;
+        };
+        if self.layout.session_height_cache.contains_key(&session_id) {
+            return;
+        }
+
+        let request_id = self.next_height_cache_load_request_id();
+        let repaint_ctx = self.session.ui_io.repaint_ctx.clone();
+        let (tx, rx) = mpsc::channel();
+        self.session.height_cache_load_started_at = Some(Instant::now());
+        self.session.height_cache_load_rx = Some(rx);
+
+        thread::spawn(move || {
+            let cache = data_manager
+                .load_height_cache(&session_id)
+                .map_err(|error| error.to_string());
+            let _ = tx.send(HeightCacheLoadResult {
+                request_id,
+                session_id,
+                cache,
+            });
+            if let Some(ctx) = repaint_ctx {
+                ctx.request_repaint();
+            }
+        });
+    }}
+impl AppState {
+    pub(crate) fn drain_height_cache_load_results(&mut self) {
+        let Some(rx) = self.session.height_cache_load_rx.take() else {
+            return;
+        };
+
+        match rx.try_recv() {
+            Ok(result) => {
+                background_timing::finish_background_channel_timing(
+                    "height_cache_load",
+                    &mut self.session.height_cache_load_started_at,
+                );
+                self.handle_height_cache_load_result(result);
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                self.session.height_cache_load_rx = Some(rx);
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                background_timing::finish_background_channel_timing(
+                    "height_cache_load",
+                    &mut self.session.height_cache_load_started_at,
+                );
+            }
+        }
+    }}
+impl AppState {
+    pub(crate) fn drain_mcp_config_status_results(&mut self) {
+        let Some(rx) = self.session.mcp_config_status_rx.take() else {
+            return;
+        };
+
+        match rx.try_recv() {
+            Ok(result) => {
+                background_timing::finish_background_channel_timing(
+                    "mcp_config_status",
+                    &mut self.session.mcp_config_status_started_at,
+                );
+                if result.request_id < self.session.latest_mcp_config_request_id {
+                    return;
+                }
+                self.session.mcp_config_cache_key = Some(result.cache_key);
+                self.session.fff_mcp_server_explicitly_configured =
+                    Some(result.fff_explicitly_configured);
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                self.session.mcp_config_status_rx = Some(rx);
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                background_timing::finish_background_channel_timing(
+                    "mcp_config_status",
+                    &mut self.session.mcp_config_status_started_at,
+                );
+            }
+        }
+    }}
+impl AppState {
+    fn handle_height_cache_load_result(&mut self, result: HeightCacheLoadResult) {
+        if result.request_id < self.session.latest_height_cache_load_request_id {
+            return;
+        }
+
+        match result.cache {
+            Ok(Some(mut cache)) => {
+                if self
+                    .session
+                    .current_session
+                    .as_ref()
+                    .is_some_and(|session| session.id == result.session_id)
+                {
+                    if let Some(session) = self.session.current_session.as_ref() {
+                        validate_height_cache_entries(&mut cache, &session.messages);
+                    }
+                }
+                self.layout
+                    .session_height_cache
+                    .insert(result.session_id, cache);
+            }
+            Ok(None) => {
+                self.layout.session_height_cache.remove(&result.session_id);
+            }
+            Err(error) => {
+                error!(
+                    error=%error,
+                    session_id=%result.session_id,
+                    "failed to load height cache"
+                );
+            }
+        }
+    }}
+fn validate_height_cache_entries(cache: &mut SessionHeightCache, messages: &[ChatMessage]) {
+    for entry in cache.widths.values_mut() {
+        if entry.message_count == messages.len() && entry.row_heights.len() == messages.len() {
+            entry.message_count = 0;
+        }
+    }
+}
+fn provider_mcp_json_path(provider: ModelProvider) -> PathBuf {
+    crate::provider_bridge::background_provider_overrides(provider)
+        .mcp_json_path
+        .or_else(|| std::env::var_os("RUST_CHATBOT_TEST_MCP_JSON_PATH").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(config::mcp_json_path()))
+}
+fn read_explicit_mcp_server_configured(
+    provider: ModelProvider,
+    mcp_json_path: &Path,
+    server_name: &str,
+) -> bool {
+    let Ok(json) = std::fs::read_to_string(mcp_json_path) else {
+        return false;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return false;
+    };
+    configured_provider_mcp_servers(&parsed, provider)
+        .and_then(|servers| servers.get(server_name))
+        .is_some()
+}
+fn configured_provider_mcp_servers<'a>(
+    parsed: &'a serde_json::Value,
+    provider: ModelProvider,
+) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
+    provider_mcp_profile(provider)
+        .and_then(|profile| {
+            parsed
+                .get("providers")
+                .and_then(|value| value.as_object())
+                .and_then(|providers| providers.get(profile))
+                .and_then(|value| value.as_object())
+                .and_then(|provider| provider.get("mcpServers"))
+                .and_then(|value| value.as_object())
+        })
+        .or_else(|| parsed.get("mcpServers").and_then(|value| value.as_object()))
+}
+fn provider_mcp_profile(provider: ModelProvider) -> Option<&'static str> {
+    match provider {
+        ModelProvider::Claude
+        | ModelProvider::MiniMax
+        | ModelProvider::OmniForge
+        | ModelProvider::GeminiForge
+        | ModelProvider::GeminiCliForge
+        | ModelProvider::MiniMaxForge
+        | ModelProvider::Hermes
+        | ModelProvider::Forge
+        | ModelProvider::Claw => Some("claude"),
+        ModelProvider::Codex | ModelProvider::Nvidia => Some("codex"),
+        ModelProvider::Gemini => Some("gemini"),
+        ModelProvider::Qwen
+        | ModelProvider::OpenRouter
+        | ModelProvider::Kimi
+        | ModelProvider::OpenCode => None,
+    }
+}
