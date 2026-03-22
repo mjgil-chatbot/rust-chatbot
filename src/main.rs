@@ -24,6 +24,9 @@ pub use chatbot_lib::stream;
 pub use chatbot_lib::summary;
 pub use chatbot_lib::sync;
 pub use chatbot_lib::worker;
+pub use chatbot_lib::workspace;
+#[cfg(test)]
+pub(crate) use chatbot_lib::TEST_ENV_LOCK;
 mod app;
 mod forge_loop;
 mod markdown;

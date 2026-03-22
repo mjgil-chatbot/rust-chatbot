@@ -22,12 +22,15 @@ use crate::summary::{JsonSummary, JsonSummaryPreview};
 use crate::sync::SyncShm;
 use crate::worker;
 use crate::worker::WorkerResult;
+use crate::workspace;
 #[path = "state/background_timing.rs"]
 mod background_timing;
 #[path = "state/history_maintenance.rs"]
 mod history_maintenance;
 #[path = "state/history_repo_capture.rs"]
 mod history_repo_capture;
+#[path = "state/history_support.rs"]
+mod history_support;
 #[path = "state/ui_io.rs"]
 mod ui_io;
 pub(crate) use self::history_maintenance::human_bytes;
