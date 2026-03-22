@@ -15,6 +15,7 @@ use rust_debug::tracing::{debug, error, info, warn};
 use crate::config;
 use crate::data::{ChatMessage, ChatSession, DataManager, SessionHeightCache, SessionInfo};
 use crate::markdown::MarkdownCache;
+use crate::memory;
 use crate::model::ModelProvider;
 use crate::socket::SocketHandle;
 use crate::socket::SyncEvent;

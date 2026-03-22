@@ -13,6 +13,7 @@ use self::history_support::checkpoint_display_name;
 use self::history_support::deserialize_manifest;
 use self::history_support::is_auto_turn_checkpoint_reason;
 use self::history_support::truncate_preview;
+use self::history_repo_capture::build_checkpoint_manifest;
 pub(crate) use self::history_repo_capture::{
     CheckpointRepoSummary, RepoPatchCaptureState, RepoPatchSummary,
 };
@@ -119,6 +120,53 @@ fn open_history_store(path: &Path, create_parent: bool) -> Result<SqliteStore> {
         }
     }
     Ok(SqliteStore::open(path)?)
+}
+fn create_turn_checkpoint(
+    store: &mut SqliteStore,
+    workspace_root: &Path,
+    session_id: SessionId,
+    branch_id: BranchId,
+    turn_id: TurnId,
+    reason: String,
+) -> Result<()> {
+    create_checkpoint(
+        store,
+        workspace_root,
+        session_id,
+        branch_id,
+        Some(turn_id),
+        reason,
+    )?;
+    Ok(())
+}
+fn create_checkpoint(
+    store: &mut SqliteStore,
+    workspace_root: &Path,
+    session_id: SessionId,
+    branch_id: BranchId,
+    turn_id: Option<TurnId>,
+    reason: String,
+) -> Result<CheckpointId> {
+    let checkpoint_id = CheckpointId::new();
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let manifest = build_checkpoint_manifest(store, workspace_root, &created_at)?;
+    store.create_checkpoint(&HistoryCheckpointInfo {
+        id: checkpoint_id,
+        session_id,
+        branch_id,
+        turn_id,
+        manifest_id: manifest.id,
+        reason,
+        created_at: created_at.clone(),
+    })?;
+    store.create_manifest(&HistoryManifestInfo {
+        id: manifest.id,
+        session_id,
+        checkpoint_id,
+        manifest_data: serde_json::to_string(&manifest)?,
+        created_at,
+    })?;
+    Ok(checkpoint_id)
 }
 fn build_branch_view(
     store: &SqliteStore,
