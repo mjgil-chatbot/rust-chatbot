@@ -3,18 +3,22 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
 use ai_history_core::{CheckpointId, ContentHash, ManifestId, SessionId, WorkspacePath};
 use ai_history_snapshot::manifest::{FileEntry, Manifest};
 use ai_history_snapshot::scanner::{Scanner, ScannerConfig};
 use ai_history_store::{BlobStore, HistoryStore as SqliteStore};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+
 use super::history_support::read_or_restore_history_object;
+
 const PATCH_SCHEMA_VERSION: u32 = 1;
 const PRIMARY_REPO_ROLE: &str = "workspace";
 const COMPANION_REPO_ROLE: &str = "companion";
 const PATCH_FORMAT: &str = "git-diff-binary-head-plus-untracked";
 const DEFAULT_MAX_REPO_PATCH_BYTES: u64 = 64 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RepoPatchCaptureState {
@@ -23,10 +27,13 @@ pub(crate) enum RepoPatchCaptureState {
     OmittedOversize,
     OmittedQuota,
 }
+
 impl RepoPatchCaptureState {
     fn captured(self) -> bool {
         matches!(self, Self::Captured)
-    }}
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct RepoPatchMetadata {
     schema_version: u32,
@@ -47,17 +54,20 @@ struct RepoPatchMetadata {
     omitted_reason: Option<String>,
     captured_at: String,
 }
+
 #[derive(Clone, Debug)]
 struct RepoPatchArtifact {
     slug: String,
     metadata: RepoPatchMetadata,
     patch: String,
 }
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CheckpointRepoSummary {
     pub(crate) checkpoint_id: CheckpointId,
     pub(crate) repos: Vec<RepoPatchSummary>,
 }
+
 #[derive(Clone, Debug)]
 pub(crate) struct RepoPatchSummary {
     pub(crate) slug: String,
@@ -75,6 +85,7 @@ pub(crate) struct RepoPatchSummary {
     pub(crate) omitted_reason: Option<String>,
     pub(crate) captured_at: String,
 }
+
 #[derive(Clone, Debug)]
 pub(crate) struct MaterializedRepo {
     pub(crate) repo_name: String,
@@ -85,11 +96,13 @@ pub(crate) struct MaterializedRepo {
     pub(crate) apply_commit: String,
     pub(crate) patch_bytes: usize,
 }
+
 #[derive(Clone, Debug)]
 struct RepoTarget {
     role: &'static str,
     root: PathBuf,
 }
+
 pub(crate) fn build_checkpoint_manifest(
     store: &mut SqliteStore,
     workspace_root: &Path,
@@ -104,6 +117,7 @@ pub(crate) fn build_checkpoint_manifest(
     let mut blob_store_ref = Some(&mut *store);
     Ok(scanner.scan_with_blob_store(&ws_path, &mut blob_store_ref)?)
 }
+
 pub(crate) fn load_checkpoint_repo_summaries(
     store: &SqliteStore,
     workspace_root: &Path,
@@ -126,6 +140,7 @@ pub(crate) fn load_checkpoint_repo_summaries(
     }
     Ok(summaries)
 }
+
 pub(crate) fn materialize_checkpoint_repos(
     store: &SqliteStore,
     workspace_root: &Path,
@@ -196,6 +211,7 @@ pub(crate) fn materialize_checkpoint_repos(
 
     Ok(materialized)
 }
+
 fn build_repo_patch_manifest(
     store: &mut SqliteStore,
     workspace_root: &Path,
@@ -234,6 +250,7 @@ fn build_repo_patch_manifest(
     manifest.finalize();
     Ok(Some(manifest))
 }
+
 fn collect_repo_targets(workspace_root: &Path) -> Result<Vec<RepoTarget>> {
     let Some(primary_root) = resolve_git_repo_root(workspace_root)? else {
         return Ok(Vec::new());
@@ -259,6 +276,7 @@ fn collect_repo_targets(workspace_root: &Path) -> Result<Vec<RepoTarget>> {
 
     Ok(targets)
 }
+
 fn companion_repo_roots(primary_root: &Path) -> Result<Vec<PathBuf>> {
     let mut roots = cargo_path_dependency_roots(primary_root)?;
     let adapter_root = primary_root
@@ -281,6 +299,7 @@ fn companion_repo_roots(primary_root: &Path) -> Result<Vec<PathBuf>> {
 
     Ok(resolved.into_iter().collect())
 }
+
 fn cargo_path_dependency_roots(primary_root: &Path) -> Result<Vec<PathBuf>> {
     let cargo_toml_path = primary_root.join("Cargo.toml");
     if !cargo_toml_path.is_file() {
@@ -316,6 +335,7 @@ fn cargo_path_dependency_roots(primary_root: &Path) -> Result<Vec<PathBuf>> {
 
     Ok(roots)
 }
+
 fn collect_path_dependencies_from_table(
     table: Option<&toml::value::Table>,
     primary_root: &Path,
@@ -335,6 +355,7 @@ fn collect_path_dependencies_from_table(
         roots.push(primary_root.join(path_value));
     }
 }
+
 fn resolve_git_repo_root(path: &Path) -> Result<Option<PathBuf>> {
     let output = Command::new("git")
         .arg("-C")
@@ -354,6 +375,7 @@ fn resolve_git_repo_root(path: &Path) -> Result<Option<PathBuf>> {
     }
     Ok(Some(PathBuf::from(root)))
 }
+
 fn repo_has_changes(repo_root: &Path) -> Result<bool> {
     let output = git_output(
         repo_root,
@@ -362,6 +384,7 @@ fn repo_has_changes(repo_root: &Path) -> Result<bool> {
     )?;
     Ok(!output.trim().is_empty())
 }
+
 fn capture_repo_patch(target: &RepoTarget, created_at: &str) -> Result<RepoPatchArtifact> {
     let apply_commit = git_output(target.root.as_path(), &["rev-parse", "HEAD"], &[0])?;
     let tracked_patch = git_output(
@@ -482,6 +505,7 @@ fn capture_repo_patch(target: &RepoTarget, created_at: &str) -> Result<RepoPatch
         patch,
     })
 }
+
 fn add_artifact_entry(
     store: &mut SqliteStore,
     manifest: &mut Manifest,
@@ -513,6 +537,7 @@ fn add_artifact_entry(
     });
     Ok(true)
 }
+
 fn omitted_repo_patch_artifact(
     repo_name: &str,
     target: &RepoTarget,
@@ -545,6 +570,7 @@ fn omitted_repo_patch_artifact(
         patch: String::new(),
     }
 }
+
 fn maybe_omit_repo_patch_for_storage(
     store: &SqliteStore,
     artifact: &mut RepoPatchArtifact,
@@ -571,6 +597,7 @@ fn maybe_omit_repo_patch_for_storage(
     artifact.patch.clear();
     Ok(())
 }
+
 fn max_repo_patch_bytes() -> u64 {
     std::env::var("RUST_CHATBOT_HISTORY_MAX_REPO_PATCH_BYTES")
         .ok()
@@ -578,6 +605,7 @@ fn max_repo_patch_bytes() -> u64 {
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_MAX_REPO_PATCH_BYTES)
 }
+
 fn repo_patch_summaries(
     store: &SqliteStore,
     workspace_root: &Path,
@@ -611,6 +639,7 @@ fn repo_patch_summaries(
     }
     Ok(summaries)
 }
+
 fn load_repo_patch_artifacts(
     store: &SqliteStore,
     workspace_root: &Path,
@@ -628,6 +657,7 @@ fn load_repo_patch_artifacts(
 
     Ok(artifacts)
 }
+
 fn repo_patch_metadata_paths(manifest: &Manifest) -> Vec<String> {
     let mut metadata_paths = manifest
         .entries
@@ -638,6 +668,7 @@ fn repo_patch_metadata_paths(manifest: &Manifest) -> Vec<String> {
     metadata_paths.sort();
     metadata_paths
 }
+
 fn load_repo_patch_artifact(
     store: &SqliteStore,
     workspace_root: &Path,
@@ -671,6 +702,7 @@ fn load_repo_patch_artifact(
         patch,
     })
 }
+
 fn read_artifact_entry(
     store: &SqliteStore,
     workspace_root: &Path,
@@ -681,6 +713,7 @@ fn read_artifact_entry(
     }
     Ok(store.read_blob(blob_hash.as_bytes())?)
 }
+
 fn git_output(repo_root: &Path, args: &[&str], success_codes: &[i32]) -> Result<String> {
     let output = Command::new("git")
         .arg("-C")
@@ -699,6 +732,7 @@ fn git_output(repo_root: &Path, args: &[&str], success_codes: &[i32]) -> Result<
     }
     Ok(String::from_utf8(output.stdout)?)
 }
+
 fn run_git_command(args: &[&str], stdin_bytes: Option<&[u8]>) -> Result<()> {
     let mut command = Command::new("git");
     command.args(args);
@@ -726,6 +760,7 @@ fn run_git_command(args: &[&str], stdin_bytes: Option<&[u8]>) -> Result<()> {
     }
     Ok(())
 }
+
 fn slugify_repo_name(name: &str) -> String {
     let mut slug = String::new();
     for ch in name.chars() {
@@ -737,3 +772,7 @@ fn slugify_repo_name(name: &str) -> String {
     }
     slug.trim_matches('-').to_string()
 }
+
+#[cfg(test)]
+#[path = "history_repo_capture_tests.rs"]
+mod history_repo_capture_tests;

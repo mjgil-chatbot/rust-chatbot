@@ -9,11 +9,15 @@ use ai_history_ui_model::{
     BranchItem, BranchTimelineView, CheckpointItem, CheckpointListView, TimelineItem, TimelineView,
 };
 const HISTORY_PANEL_TURN_LIMIT: usize = 24;
-use self::history_support::checkpoint_display_name;
-use self::history_support::deserialize_manifest;
-use self::history_support::is_auto_turn_checkpoint_reason;
-use self::history_support::truncate_preview;
-use self::history_repo_capture::build_checkpoint_manifest;
+use self::history_maintenance::maintain_history_store;
+use self::history_support::{
+    auto_turn_checkpoint_reason, checkpoint_display_name, display_history_session_title,
+    deserialize_manifest, history_missing_notice, history_restored_notice, history_store_path,
+    is_auto_turn_checkpoint_reason, linked_history_session_title, mirror_history_store,
+    parse_chat_turns, restore_history_store_if_needed, truncate_preview,
+};
+use self::history_repo_capture::{build_checkpoint_manifest, load_checkpoint_repo_summaries};
+use self::history_sync::{backfill_missing_turn_checkpoints, reconcile_existing_turn};
 pub(crate) use self::history_repo_capture::{
     CheckpointRepoSummary, RepoPatchCaptureState, RepoPatchSummary,
 };
@@ -88,6 +92,32 @@ impl HistoryUiState {
             ..HistorySnapshot::default()
         };
     }}
+impl AppState {
+    fn spawn_history_refresh_async(&mut self, request: HistoryRefreshRequest) {
+        if self.session.history.refresh_in_flight {
+            return;
+        }
+
+        self.session.history.last_request_key = Some(request.key.clone());
+        let repaint_ctx = self.session.ui_io.repaint_ctx.clone();
+        let (tx, rx) = mpsc::channel();
+        self.session.history.refresh_in_flight = true;
+        self.session.history.refresh_started_at = Some(Instant::now());
+        self.session.history.refresh_rx = Some(rx);
+
+        thread::spawn(move || {
+            let result = load_history_snapshot(request.clone())
+                .map(|snapshot| HistoryRefreshResult {
+                    key: request.key.clone(),
+                    snapshot,
+                })
+                .map_err(|err| (request.key, format!("{err:#}")));
+            let _ = tx.send(result);
+            if let Some(ctx) = repaint_ctx {
+                ctx.request_repaint();
+            }
+        });
+    }}
 fn history_request_key(
     workspace_root: &str,
     chat: Option<&ChatSession>,
@@ -100,6 +130,92 @@ fn history_request_key(
         chat_fingerprint: chat.map(ChatSession::history_fingerprint),
         force_create,
     }
+}
+fn load_history_snapshot(request: HistoryRefreshRequest) -> Result<HistorySnapshot> {
+    let workspace_root = PathBuf::from(&request.key.workspace_root);
+    let restored_from_backup = restore_history_store_if_needed(&workspace_root)?;
+    let store_path = history_store_path(&workspace_root)?;
+    if !store_path.is_file() && !request.key.force_create {
+        return Ok(HistorySnapshot {
+            workspace_root: Some(request.key.workspace_root),
+            store_path: Some(store_path.display().to_string()),
+            has_store: false,
+            notice: Some(history_missing_notice()),
+            ..HistorySnapshot::default()
+        });
+    }
+
+    let mut store = open_history_store(&store_path, request.key.force_create)?;
+    let mut store_updated = false;
+    let mut linked_session: Option<HistorySessionInfo> = None;
+
+    if request.key.force_create {
+        if let Some(chat) = request.chat.as_ref() {
+            linked_session = Some(sync_chat_history(
+                &mut store,
+                workspace_root.as_path(),
+                chat,
+            )?);
+            store_updated = true;
+        }
+    }
+
+    let maintenance = maintain_history_store(&mut store, workspace_root.as_path())?;
+    if maintenance.mutated() {
+        store_updated = true;
+    }
+
+    let sessions = store.list_sessions()?;
+    let linked_session = linked_session.or_else(|| {
+        request
+            .chat
+            .as_ref()
+            .and_then(|chat| find_linked_history_session(&sessions, &chat.id))
+            .cloned()
+    });
+
+    let mut snapshot = HistorySnapshot {
+        workspace_root: Some(request.key.workspace_root),
+        store_path: Some(store_path.display().to_string()),
+        has_store: true,
+        total_sessions: sessions.len(),
+        linked_session_title: linked_session
+            .as_ref()
+            .map(|session| display_history_session_title(&session.title)),
+        object_store_bytes: maintenance.object_store_bytes,
+        object_store_files: maintenance.object_store_files,
+        auto_checkpoint_count: maintenance.auto_checkpoint_count,
+        ..HistorySnapshot::default()
+    };
+
+    if let Some(session) = linked_session {
+        let active_branch = store.resolve_active_branch(session.id)?.branch;
+        store.set_active_session_id(session.id)?;
+        store.set_active_branch_id(session.id, active_branch.id)?;
+        snapshot.branch_view = Some(build_branch_view(&store, &session, active_branch.id)?);
+        snapshot.checkpoint_view = Some(build_checkpoint_view(&store, &session, active_branch.id)?);
+        snapshot.checkpoint_repo_summaries =
+            load_checkpoint_repo_summaries(&store, workspace_root.as_path(), session.id)?;
+        snapshot.timeline_view = Some(build_timeline_view(&store, &session, active_branch.id)?);
+    } else if request.chat.is_some() {
+        snapshot.notice = Some("History is enabled, but this chat has not been linked yet.".to_string());
+    }
+
+    snapshot.notice = merge_history_notice(snapshot.notice.take(), maintenance.notice.clone());
+
+    if restored_from_backup.restored() {
+        snapshot.notice = merge_history_notice(
+            Some(history_restored_notice(restored_from_backup)),
+            snapshot.notice.take(),
+        );
+    }
+
+    drop(store);
+    if store_updated {
+        mirror_history_store(&workspace_root)?;
+    }
+
+    Ok(snapshot)
 }
 fn merge_history_notice(
     primary: Option<String>,
@@ -120,6 +236,180 @@ fn open_history_store(path: &Path, create_parent: bool) -> Result<SqliteStore> {
         }
     }
     Ok(SqliteStore::open(path)?)
+}
+fn sync_chat_history(
+    store: &mut SqliteStore,
+    workspace_root: &Path,
+    chat: &ChatSession,
+) -> Result<HistorySessionInfo> {
+    let sessions = store.list_sessions()?;
+    let session = if let Some(existing) = find_linked_history_session(&sessions, &chat.id) {
+        if existing.title != linked_history_session_title(chat) {
+            store.update_session_title(existing.id, &linked_history_session_title(chat))?;
+        }
+        existing.clone()
+    } else {
+        let session_id = SessionId::new();
+        store.create_session(session_id, workspace_root.to_string_lossy().as_ref())?;
+        store.update_session_title(session_id, &linked_history_session_title(chat))?;
+        store
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("history session was not persisted"))?
+    };
+
+    store.set_active_session_id(session.id)?;
+    let branch = store.resolve_active_branch(session.id)?.branch;
+    store.set_active_branch_id(session.id, branch.id)?;
+
+    append_missing_turns(store, workspace_root, session.id, branch.id, chat)?;
+
+    store
+        .get_session(session.id)?
+        .ok_or_else(|| anyhow::anyhow!("history session disappeared after sync"))
+}
+fn append_missing_turns(
+    store: &mut SqliteStore,
+    workspace_root: &Path,
+    session_id: SessionId,
+    branch_id: BranchId,
+    chat: &ChatSession,
+) -> Result<()> {
+    let parsed_turns = parse_chat_turns(chat);
+    if parsed_turns.is_empty() {
+        return Ok(());
+    }
+
+    let existing_turns = store.get_turns_for_branch(branch_id)?;
+    if existing_turns.len() > parsed_turns.len() {
+        return Ok(());
+    }
+
+    let mut checkpointed_turns = store
+        .list_checkpoints(session_id)?
+        .into_iter()
+        .filter(|checkpoint| is_auto_turn_checkpoint_reason(&checkpoint.reason))
+        .filter_map(|checkpoint| checkpoint.turn_id)
+        .collect::<HashSet<_>>();
+    let mut head_turn_id = existing_turns.last().map(|turn| turn.id);
+    if let Some(existing_turn) = existing_turns.last() {
+        let parsed = &parsed_turns[existing_turns.len() - 1];
+        if reconcile_existing_turn(store, existing_turn.id, parsed)?
+            && checkpointed_turns.insert(existing_turn.id)
+        {
+            create_turn_checkpoint(
+                store,
+                workspace_root,
+                session_id,
+                branch_id,
+                existing_turn.id,
+                auto_turn_checkpoint_reason(chat, existing_turns.len() - 1),
+            )?;
+        }
+    }
+
+    for (index, parsed) in parsed_turns.iter().enumerate().skip(existing_turns.len()) {
+        let turn_id = TurnId::new();
+        let turn = HistoryTurnInfo {
+            id: turn_id,
+            session_id,
+            branch_id,
+            parent_turn_id: head_turn_id,
+            actor: match parsed.actor {
+                Actor::User => "User".to_string(),
+                Actor::Assistant => "Assistant".to_string(),
+                _ => "System".to_string(),
+            },
+            created_at: parsed.timestamp.clone(),
+            finalized_at: None,
+        };
+        store.create_turn(&turn)?;
+
+        let mut sequence_num = 0;
+        if let Some(user_content) = parsed.user_content.as_deref() {
+            let message = MessageRecord::new(turn_id, "User", "user", user_content, sequence_num)
+                .with_metadata("source_chat_id", &chat.id)
+                .with_metadata("turn_index", &index.to_string());
+            store.create_message(&message)?;
+            sequence_num += 1;
+        }
+        if let Some(assistant_content) = parsed.assistant_content.as_deref() {
+            let message = MessageRecord::new(
+                turn_id,
+                "Assistant",
+                "assistant",
+                assistant_content,
+                sequence_num,
+            )
+            .with_metadata("source_chat_id", &chat.id)
+            .with_metadata("turn_index", &index.to_string());
+            store.create_message(&message)?;
+            store.finalize_turn(turn_id)?;
+            if checkpointed_turns.insert(turn_id) {
+                create_turn_checkpoint(
+                    store,
+                    workspace_root,
+                    session_id,
+                    branch_id,
+                    turn_id,
+                    auto_turn_checkpoint_reason(chat, index),
+                )?;
+            }
+        }
+
+        head_turn_id = Some(turn_id);
+    }
+
+    backfill_missing_turn_checkpoints(
+        store,
+        workspace_root,
+        session_id,
+        branch_id,
+        chat,
+        &parsed_turns,
+        &mut checkpointed_turns,
+    )?;
+
+    if let Some(head_turn_id) = head_turn_id {
+        store.update_branch_head(branch_id, head_turn_id)?;
+    }
+
+    Ok(())
+}
+fn create_history_checkpoint(
+    workspace_root: &str,
+    chat: &ChatSession,
+    checkpoint_name: &str,
+) -> Result<String> {
+    let workspace_root = PathBuf::from(workspace_root);
+    let _ = restore_history_store_if_needed(&workspace_root)?;
+    let store_path = history_store_path(&workspace_root)?;
+    let mut store = open_history_store(&store_path, true)?;
+    let session = sync_chat_history(&mut store, &workspace_root, chat)?;
+    let branch = store.resolve_active_branch(session.id)?.branch;
+    let reason = if checkpoint_name.trim().is_empty() {
+        "manual".to_string()
+    } else {
+        format!("named:{}", checkpoint_name.trim())
+    };
+    let checkpoint_id = create_checkpoint(
+        &mut store,
+        &workspace_root,
+        session.id,
+        branch.id,
+        branch.head_turn_id,
+        reason,
+    )?;
+
+    let result = if checkpoint_name.trim().is_empty() {
+        checkpoint_id.to_string()
+    } else {
+        checkpoint_name.trim().to_string()
+    };
+
+    drop(store);
+    mirror_history_store(&workspace_root)?;
+
+    Ok(result)
 }
 fn create_turn_checkpoint(
     store: &mut SqliteStore,

@@ -32,6 +32,8 @@ mod history_maintenance;
 mod history_repo_capture;
 #[path = "state/history_support.rs"]
 mod history_support;
+#[path = "state/history_sync.rs"]
+mod history_sync;
 #[path = "state/ui_io.rs"]
 mod ui_io;
 pub(crate) use self::history_maintenance::human_bytes;
