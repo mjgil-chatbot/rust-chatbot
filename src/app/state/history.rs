@@ -556,5 +556,8 @@ fn find_linked_history_session<'a>(
         .find(|session| session.title.starts_with(prefix.as_str()))
 }
 #[cfg(test)]
+#[path = "history_tests.rs"]
+mod history_tests;
+#[cfg(test)]
 #[path = "history_maintenance_tests.rs"]
 mod history_maintenance_tests;

@@ -55,3 +55,12 @@ pub enum SyncEvent {
 pub struct SocketHandle {
     writer: Arc<Mutex<Option<UnixStream>>>,
 }
+impl SocketHandle {
+    /// Create a disconnected handle that silently drops all messages.
+    /// Used in tests where no broker is running.
+    #[cfg(test)]
+    pub fn noop() -> Self {
+        Self {
+            writer: Arc::new(Mutex::new(None)),
+        }
+    }}

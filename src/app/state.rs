@@ -325,6 +325,23 @@ impl LayoutState {
         }
     }}
 impl AppState {
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(provider: ModelProvider) -> Self {
+        let (_tx, rx) = mpsc::channel();
+        let mut state = Self {
+            session: SessionState::new(provider),
+            worker: AppWorkerState::new(),
+            layout: LayoutState::new(),
+            sync_shm: None,
+            sync_socket: SocketHandle::noop(),
+            sync_events: rx,
+            instance_number: None,
+            dialog_parent: None,
+        };
+        state.refresh_mcp_config_status_in_background();
+        state
+    }}
+impl AppState {
     fn next_height_cache_load_request_id(&mut self) -> u64 {
         self.session.latest_height_cache_load_request_id = self
             .session
