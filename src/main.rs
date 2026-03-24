@@ -19,6 +19,7 @@ use eframe::egui;
 pub use chatbot_lib::config;
 pub use chatbot_lib::data;
 pub use chatbot_lib::memory;
+pub use chatbot_lib::memory_job;
 pub use chatbot_lib::model;
 pub use chatbot_lib::provider_bridge;
 pub use chatbot_lib::stream;
