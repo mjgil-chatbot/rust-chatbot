@@ -21,8 +21,7 @@ use crate::socket::SocketHandle;
 use crate::socket::SyncEvent;
 use crate::summary::{JsonSummary, JsonSummaryPreview};
 use crate::sync::SyncShm;
-use crate::worker;
-use crate::worker::WorkerResult;
+use crate::worker::{self, WorkerResult, WorkerState};
 use crate::workspace;
 #[path = "state/background_timing.rs"]
 mod background_timing;
@@ -37,9 +36,10 @@ mod history_sync;
 #[path = "state/ui_io.rs"]
 mod ui_io;
 pub(crate) use self::history_maintenance::human_bytes;
-use ui_io::UiIoResult;
-use ui_io::UiIoSaveOperation;
-use ui_io::UiIoState;
+use ui_io::{
+    save_operation_label, update_message_request_metadata, PendingUiSend, UiIoResult,
+    UiIoSaveOperation, UiIoState,
+};
 pub(crate) const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const STARTUP_SESSION_PRELOAD_LIMIT: usize = 0;
 const PREALLOCATED_SESSION_POOL_SIZE: usize = 5;
