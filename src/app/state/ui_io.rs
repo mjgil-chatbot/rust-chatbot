@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result};
 use super::*;
+#[path = "ui_io_background.rs"]
+mod background;
+use background::load_selected_session;
 #[derive(Clone)]
 pub(crate) struct SessionListPatch {
     pub(crate) sessions: Vec<SessionInfo>,
@@ -102,3 +105,4 @@ impl UiIoState {
             pending_send_chat_ids: HashSet::new(),
         }
     }}
+include!("ui_io_async_impl.rs");
