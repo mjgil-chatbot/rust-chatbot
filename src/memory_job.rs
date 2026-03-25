@@ -5,10 +5,45 @@ use std::process::{Command, Stdio};
 use anyhow::{bail, Context, Result};
 use rust_debug::tracing::{info, warn};
 use crate::data::{ChatSession, DataManager};
-use crate::memory;
+use crate::memory::{self, MemoryContext};
 use crate::model::ModelProvider;
 use crate::storage;
 const MEMORY_JOB_FLAG: &str = "--memory-job";
+pub fn retrieve_memory_context_with_helper(
+    workspace_path: &str,
+    query: &str,
+) -> Result<Option<MemoryContext>> {
+    let Some(mut command) = memory_job_command()? else {
+        return memory::retrieve_memory_context(workspace_path, query);
+    };
+    let output = match command
+        .arg("retrieve")
+        .arg("--workspace-path")
+        .arg(workspace_path)
+        .arg("--query")
+        .arg(query)
+        .output()
+    {
+        Ok(output) => output,
+        Err(err) => {
+            warn!(
+                error=%err,
+                workspace_path,
+                "memory helper launch failed; falling back to in-process retrieval"
+            );
+            return memory::retrieve_memory_context(workspace_path, query);
+        }
+    };
+
+    if !output.status.success() {
+        bail!(
+            "embedded memory retrieval job failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    serde_json::from_slice(&output.stdout).context("decode embedded memory retrieval response")
+}
 pub fn spawn_backfill_process(provider: ModelProvider) -> Result<()> {
     let provider_name = provider.as_str().to_string();
     spawn_background_memory_job(

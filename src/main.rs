@@ -21,6 +21,7 @@ pub use chatbot_lib::data;
 pub use chatbot_lib::memory;
 pub use chatbot_lib::memory_job;
 pub use chatbot_lib::model;
+pub use chatbot_lib::omniforge;
 pub use chatbot_lib::provider_bridge;
 pub use chatbot_lib::stream;
 pub use chatbot_lib::summary;
@@ -30,6 +31,7 @@ pub use chatbot_lib::workspace;
 #[cfg(test)]
 pub(crate) use chatbot_lib::TEST_ENV_LOCK;
 mod app;
+mod common;
 mod forge_loop;
 mod markdown;
 mod socket;

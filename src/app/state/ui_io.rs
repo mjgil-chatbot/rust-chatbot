@@ -3,7 +3,10 @@ use anyhow::{Context, Result};
 use super::*;
 #[path = "ui_io_background.rs"]
 mod background;
-use background::load_selected_session;
+use background::{
+    load_selected_session, load_selected_session_after_delete, load_session_list_patch,
+    save_session_in_background,
+};
 #[derive(Clone)]
 pub(crate) struct SessionListPatch {
     pub(crate) sessions: Vec<SessionInfo>,
