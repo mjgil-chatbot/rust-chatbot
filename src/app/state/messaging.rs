@@ -11,10 +11,75 @@ impl AppState {
         true
     }}
 impl AppState {
+    fn send_message_text(&mut self, raw_query: String) -> Result<()> {
+        if raw_query.trim().is_empty() || self.is_processing() {
+            debug!(
+                is_processing = self.is_processing(),
+                input_len = raw_query.len(),
+                "send_message_text skipped"
+            );
+            return Ok(());
+        }
+
+        let selected_workspace_dir = self.session.workspace_dir.clone();
+        let Some(session) = self.session.current_session.as_mut() else {
+            return Ok(());
+        };
+        if session.launched_from.is_none() {
+            session.launched_from = selected_workspace_dir;
+        }
+        session.add_message_with_command(raw_query.clone(), true, None);
+        let Some(message_timestamp_ms) = session
+            .messages
+            .last()
+            .map(|message| message.timestamp.timestamp_millis())
+        else {
+            return Ok(());
+        };
+        let session_to_prepare = session.clone();
+        let chat_id = session_to_prepare.id.clone();
+        info!(session_id=%chat_id, "user_message_queued_for_background_send");
+
+        self.session.pending_draft = Some(PendingDraft {
+            chat_id: chat_id.clone(),
+            user_message_timestamp_ms: message_timestamp_ms,
+        });
+
+        self.session.promote_session_to_top(&chat_id);
+        self.refresh_current_session_tracking();
+        self.bump_sessions_version();
+        self.spawn_send_message_async(
+            session_to_prepare,
+            raw_query,
+            PendingUiSend {
+                chat_id,
+                message_timestamp_ms,
+            },
+        );
+        self.layout.should_focus_input = true;
+        Ok(())
+    }}
+impl AppState {
     fn bump_sessions_version(&mut self) {
         if let Some(ref mut shm) = self.sync_shm {
             shm.bump_sessions_version();
         }
+    }}
+impl AppState {
+    pub fn send_message(&mut self) -> Result<()> {
+        if self.layout.input_text.trim().is_empty() || self.is_processing() {
+            debug!(
+                is_processing = self.is_processing(),
+                input_len = self.layout.input_text.len(),
+                "send_message skipped"
+            );
+            return Ok(());
+        }
+
+        let raw_query = self.layout.input_text.clone();
+        self.layout.input_text.clear();
+        self.session.input_history_index = None;
+        self.send_message_text(raw_query)
     }}
 impl AppState {
     fn resolve_worker_binary_for_current_profile() -> Result<std::path::PathBuf> {

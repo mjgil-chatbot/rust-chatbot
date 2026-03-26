@@ -35,6 +35,8 @@ mod history_support;
 mod history_sync;
 #[path = "state/ui_io.rs"]
 mod ui_io;
+#[path = "state/ui_sync_async.rs"]
+mod ui_sync_async;
 pub(crate) use self::history_maintenance::human_bytes;
 use ui_io::{
     save_operation_label, update_message_request_metadata, PendingUiSend, UiIoResult,
@@ -587,3 +589,6 @@ fn provider_mcp_profile(provider: ModelProvider) -> Option<&'static str> {
         | ModelProvider::OpenCode => None,
     }
 }
+#[cfg(test)]
+#[path = "state/ui_spec_lifecycle_tests.rs"]
+mod ui_spec_lifecycle_tests;

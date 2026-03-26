@@ -301,3 +301,15 @@ impl AppState {
         }
     }}
 include!("ui_io_async_impl.rs");
+#[cfg(test)]
+#[path = "ui_io_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "ui_io_create_tests.rs"]
+mod create_tests;
+#[cfg(test)]
+#[path = "ui_io_async_tests.rs"]
+mod async_tests;
+#[cfg(test)]
+#[path = "ui_io_reload_guard_tests.rs"]
+mod reload_guard_tests;

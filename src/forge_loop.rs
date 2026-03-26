@@ -1,3 +1,9 @@
+pub(crate) fn extract_continue_id(content: &str) -> Option<String> {
+    content
+        .lines()
+        .find_map(extract_continue_id_from_line)
+        .map(str::to_string)
+}
 pub(crate) fn sanitize_stream_plaintext(content: &str) -> String {
     let mut sanitized_lines = Vec::new();
 
@@ -23,6 +29,16 @@ pub(crate) fn transcript_preamble(content: &str) -> Option<String> {
         transcript_lines.push(trimmed.to_string());
     }
     (!transcript_lines.is_empty()).then(|| transcript_lines.join("\n"))
+}
+fn extract_continue_id_from_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let marker = "] Continue ";
+    let suffix = trimmed.split_once(marker)?.1;
+    let continue_id = suffix.split_whitespace().next()?;
+    is_probable_continue_id(continue_id).then_some(continue_id)
+}
+fn is_probable_continue_id(value: &str) -> bool {
+    value.len() >= 8 && value.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '-')
 }
 fn is_transcript_status_line(line: &str) -> bool {
     line.starts_with("● [")

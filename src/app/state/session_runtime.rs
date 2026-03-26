@@ -245,6 +245,17 @@ impl AppState {
         Some(session_to_save)
     }}
 impl AppState {
+    #[allow(dead_code)]
+    fn with_session_mut<F>(&mut self, session_id: &str, f: F)
+    where
+        F: FnOnce(&mut ChatSession),
+    {
+        let Some(session_to_save) = self.update_session_in_memory(session_id, f) else {
+            return;
+        };
+        self.spawn_save_session_async(session_to_save, false, None, false);
+    }}
+impl AppState {
     fn save_session_now(&self, session: ChatSession) -> Result<()> {
         if self.session.data_manager.is_none() {
             debug!(
