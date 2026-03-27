@@ -93,6 +93,14 @@ impl HistoryUiState {
         };
     }}
 impl AppState {
+    pub(crate) fn refresh_history(&mut self) {
+        if cfg!(test) && self.session.ui_io.repaint_ctx.is_none() {
+            return;
+        }
+        self.session.history.last_request_key = None;
+        self.poll_history_sync();
+    }}
+impl AppState {
     fn spawn_history_refresh_async(&mut self, request: HistoryRefreshRequest) {
         if self.session.history.refresh_in_flight {
             return;
@@ -117,6 +125,48 @@ impl AppState {
                 ctx.request_repaint();
             }
         });
+    }}
+impl AppState {
+    fn poll_history_sync(&mut self) {
+        if cfg!(test) && self.session.ui_io.repaint_ctx.is_none() {
+            return;
+        }
+
+        let Some(workspace_root) = self.session.effective_workspace_dir() else {
+            self.session.history.reset_for_missing_workspace();
+            return;
+        };
+
+        let current_chat = self.session.current_session.clone();
+        let should_force_create = current_chat
+            .as_ref()
+            .is_some_and(|chat| !chat.messages.is_empty())
+            && !self.current_history_chat_is_processing();
+        let key = history_request_key(
+            &workspace_root,
+            current_chat
+                .as_ref()
+                .filter(|_| should_force_create),
+            should_force_create,
+        );
+
+        if self.session.history.last_request_key.as_ref() == Some(&key)
+            || self.session.history.refresh_in_flight
+        {
+            return;
+        }
+
+        self.spawn_history_refresh_async(HistoryRefreshRequest {
+            key,
+            chat: current_chat,
+        });
+    }}
+impl AppState {
+    fn current_history_chat_is_processing(&self) -> bool {
+        let Some(chat_id) = self.session.current_session_id() else {
+            return false;
+        };
+        self.worker.processing_chat_ids.contains(chat_id)
     }}
 fn history_request_key(
     workspace_root: &str,
