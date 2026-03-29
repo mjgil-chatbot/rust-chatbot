@@ -214,6 +214,35 @@ impl AppState {
         self.session.refresh_current_tracking();
     }}
 impl AppState {
+    pub(crate) fn set_current_session(&mut self, session: ChatSession) {
+        debug!(
+            session_id=%session.id,
+            session_name=%session.name,
+            total_messages=session.messages.len(),
+            has_system_prompt=session
+                .system_prompt
+                .as_deref()
+                .map(|prompt| !prompt.trim().is_empty())
+                .unwrap_or(false),
+            last_message_at=?session.messages.last().map(|message| message.timestamp),
+            "setting current session"
+        );
+        let session_id = self
+            .session
+            .store_current_session(session, &mut self.layout);
+        self.session.system_prompt_dirty = self
+            .session
+            .system_prompt_dirty_session_id
+            .as_deref()
+            .is_some_and(|dirty_session_id| dirty_session_id == session_id);
+        self.session.selected_session_id = Some(session_id.clone());
+        self.session.loading_session_id = None;
+        self.sync_workspace_state_from_current_session();
+        self.refresh_mcp_config_status_in_background();
+        self.spawn_height_cache_load_for_session(session_id.clone());
+        self.session.pending_post_load_session_id = Some(session_id);
+    }}
+impl AppState {
     fn clear_current_session(&mut self) {
         self.session.clear_current_view(&mut self.layout);
         self.session.system_prompt_dirty = false;
@@ -223,6 +252,329 @@ impl AppState {
 impl AppState {
     fn reload_current_session_from_disk(&mut self, session_id: &str) {
         self.spawn_reload_current_session_async(session_id.to_string());
+    }}
+impl AppState {
+    fn sync_current_session_from_disk_if_safe(&mut self, chat_id: &str) -> bool {
+        let current_snapshot = self.session.current_session.as_ref().map(|session| {
+            (
+                session.id.clone(),
+                session.updated_at,
+                session.messages.len(),
+                session
+                    .messages
+                    .last()
+                    .map(|message| message.is_user)
+                    .unwrap_or(false),
+            )
+        });
+        if !self.session.is_current_chat(chat_id) {
+            debug!(
+                chat_id=%chat_id,
+                current_session_id=?self.session.current_session.as_ref().map(|session| session.id.as_str()),
+                "skip current-session disk sync: target chat is not the active chat"
+            );
+            return false;
+        }
+
+        let loaded =
+            self.session.data_manager.as_ref().and_then(|data_manager| {
+                match data_manager.load_session(chat_id) {
+                    Ok(session) => Some(session),
+                    Err(err) => {
+                        warn!(
+                            chat_id=%chat_id,
+                            error=%err,
+                            "failed to load current session from disk during sync"
+                        );
+                        None
+                    }
+                }
+            });
+        let Some(loaded) = loaded else {
+            debug!(
+                chat_id=%chat_id,
+                "skip current-session disk sync: no loadable session snapshot was available"
+            );
+            return false;
+        };
+        let local_is_dirty =
+            self.worker.is_chat_processing(chat_id) || self.worker.is_locally_finalized(chat_id);
+        let allow_dirty_reload = self
+            .session
+            .current_session
+            .as_ref()
+            .map(|current| local_is_dirty && session_transcript_is_strict_prefix(current, &loaded))
+            .unwrap_or(false);
+        let allow_appended_user_turn_reload = self
+            .session
+            .current_session
+            .as_ref()
+            .map(|current| local_is_dirty && session_reload_appends_user_turn(current, &loaded))
+            .unwrap_or(false);
+        if local_is_dirty && !(allow_dirty_reload || allow_appended_user_turn_reload) {
+            debug!(
+                chat_id=%chat_id,
+                is_processing=self.worker.is_chat_processing(chat_id),
+                is_locally_finalized=self.worker.is_locally_finalized(chat_id),
+                current_updated_at=?current_snapshot.as_ref().map(|(_, updated_at, _, _)| *updated_at),
+                current_message_count=?current_snapshot.as_ref().map(|(_, _, message_count, _)| *message_count),
+                "skip current-session disk sync: local in-memory state is authoritative"
+            );
+            return false;
+        }
+
+        let should_replace = self
+            .session
+            .current_session
+            .as_ref()
+            .map(|current| {
+                allow_dirty_reload
+                    || allow_appended_user_turn_reload
+                    || session_reload_is_safe(current, &loaded)
+            })
+            .unwrap_or(true);
+
+        debug!(
+            chat_id=%chat_id,
+            current_updated_at=?current_snapshot.as_ref().map(|(_, updated_at, _, _)| *updated_at),
+            current_message_count=?current_snapshot.as_ref().map(|(_, _, message_count, _)| *message_count),
+            current_last_is_user=?current_snapshot.as_ref().map(|(_, _, _, last_is_user)| *last_is_user),
+            loaded_updated_at=?loaded.updated_at,
+            loaded_message_count=loaded.messages.len(),
+            loaded_last_is_user=loaded.messages.last().map(|message| message.is_user).unwrap_or(false),
+            allow_dirty_reload,
+            allow_appended_user_turn_reload,
+            should_replace,
+            "evaluated current-session disk sync candidate"
+        );
+
+        if should_replace {
+            debug!(
+                chat_id=%chat_id,
+                loaded_updated_at=?loaded.updated_at,
+                loaded_message_count=loaded.messages.len(),
+                "replacing current session from disk before applying worker output"
+            );
+            self.set_current_session(loaded);
+            return true;
+        }
+
+        debug!(
+            chat_id=%chat_id,
+            "skip current-session disk sync: current in-memory session is newer than disk"
+        );
+        false
+    }}
+impl AppState {
+    fn sync_current_session_from_disk_for_stream_begin(&mut self, chat_id: &str) -> bool {
+        let current_snapshot = self.session.current_session.as_ref().map(|session| {
+            (
+                session.id.clone(),
+                session.updated_at,
+                session.messages.len(),
+                session
+                    .messages
+                    .last()
+                    .map(|message| message.is_user)
+                    .unwrap_or(false),
+            )
+        });
+        if !self.session.is_current_chat(chat_id) {
+            debug!(
+                chat_id=%chat_id,
+                current_session_id=?self.session.current_session.as_ref().map(|session| session.id.as_str()),
+                "skip stream-begin disk sync: target chat is not the active chat"
+            );
+            return false;
+        }
+
+        let loaded =
+            self.session.data_manager.as_ref().and_then(|data_manager| {
+                match data_manager.load_session(chat_id) {
+                    Ok(session) => Some(session),
+                    Err(err) => {
+                        warn!(
+                            chat_id=%chat_id,
+                            error=%err,
+                            "failed to load current session from disk during stream-begin sync"
+                        );
+                        None
+                    }
+                }
+            });
+        let Some(loaded) = loaded else {
+            debug!(
+                chat_id=%chat_id,
+                "skip stream-begin disk sync: no loadable session snapshot was available"
+            );
+            return false;
+        };
+
+        let should_replace = self
+            .session
+            .current_session
+            .as_ref()
+            .map(|current| {
+                session_reload_is_safe(current, &loaded)
+                    || (loaded.id == current.id
+                        && loaded.updated_at >= current.updated_at
+                        && loaded.messages.len() > current.messages.len()
+                        && loaded
+                            .messages
+                            .last()
+                            .is_some_and(|message| message.is_user))
+            })
+            .unwrap_or(true);
+
+        debug!(
+            chat_id=%chat_id,
+            current_updated_at=?current_snapshot.as_ref().map(|(_, updated_at, _, _)| *updated_at),
+            current_message_count=?current_snapshot.as_ref().map(|(_, _, message_count, _)| *message_count),
+            current_last_is_user=?current_snapshot.as_ref().map(|(_, _, _, last_is_user)| *last_is_user),
+            loaded_updated_at=?loaded.updated_at,
+            loaded_message_count=loaded.messages.len(),
+            loaded_last_is_user=loaded.messages.last().map(|message| message.is_user).unwrap_or(false),
+            should_replace,
+            "evaluated stream-begin disk sync candidate"
+        );
+
+        if should_replace {
+            debug!(
+                chat_id=%chat_id,
+                loaded_updated_at=?loaded.updated_at,
+                loaded_message_count=loaded.messages.len(),
+                "replacing current session from disk at stream begin"
+            );
+            self.set_current_session(loaded);
+            return true;
+        }
+
+        false
+    }}
+impl AppState {
+    fn handle_remote_stream_terminal_update(
+        &mut self,
+        chat_id: &str,
+        response: &str,
+        session_id: Option<String>,
+        mark_height_cache_save: bool,
+    ) {
+        debug!(
+            chat_id=%chat_id,
+            response_len=response.len(),
+            has_session_id=session_id.is_some(),
+            mark_height_cache_save,
+            current_session_id=?self.session.current_session.as_ref().map(|session| session.id.as_str()),
+            current_message_count=?self.session.current_session.as_ref().map(|session| session.messages.len()),
+            "handling remote terminal worker update"
+        );
+        // Skip disk reload when the local session has unsaved in-memory mutations.
+        // This covers two cases:
+        // 1. The worker is still running (streaming response in progress).
+        // 2. The local worker just finalized: the in-memory session is already
+        //    correct but the async disk save may not have completed yet.
+        //    Reloading from disk in this window would overwrite the final message.
+        let local_is_dirty = self.session.is_current_chat(chat_id)
+            && (self.worker.is_chat_processing(chat_id)
+                || self.worker.is_locally_finalized(chat_id));
+        // Consume the locally-finalized marker now that we've seen the echo.
+        self.worker.locally_finalized_chat_ids.remove(chat_id);
+        if !local_is_dirty {
+            let reloaded = self.sync_current_session_from_disk_if_safe(chat_id);
+            debug!(
+                chat_id=%chat_id,
+                reloaded,
+                "remote terminal update pre-sync decision completed"
+            );
+        } else {
+            debug!(
+                chat_id=%chat_id,
+                is_processing=self.worker.is_chat_processing(chat_id),
+                was_locally_finalized=local_is_dirty,
+                "remote terminal update skipped current-session disk sync because local state was dirty"
+            );
+        }
+
+        let response_changed = self.session.apply_stream_to_current(
+            chat_id,
+            response,
+            session_id,
+            &mut self.layout,
+            mark_height_cache_save,
+        );
+        debug!(
+            chat_id=%chat_id,
+            response_changed,
+            current_message_count=?self.session.current_session.as_ref().map(|session| session.messages.len()),
+            current_last_is_user=?self.session.current_session.as_ref().and_then(|session| session.messages.last().map(|message| message.is_user)),
+            "applied remote terminal worker update to current session"
+        );
+
+        // Terminal path: always clear any optimistic draft for this chat so
+        // the "Thinking..." row disappears even if the response was empty.
+        self.session.clear_pending_draft_if_matches(chat_id);
+
+        self.refresh_current_session_tracking();
+        self.layout.should_focus_input = true;
+    }}
+impl AppState {
+    fn hydrate_current_session_from_active_worker(&mut self) {
+        let Some(chat_id) = self
+            .session
+            .current_session
+            .as_ref()
+            .map(|session| session.id.clone())
+        else {
+            return;
+        };
+        let original_updated_at = self
+            .session
+            .current_session
+            .as_ref()
+            .map(|session| session.updated_at);
+        let Some(response) = self.current_worker_response(&chat_id) else {
+            return;
+        };
+
+        let response_changed = self.session.apply_stream_to_current(
+            &chat_id,
+            &response,
+            None,
+            &mut self.layout,
+            false,
+        );
+        if response_changed {
+            if let (Some(session), Some(updated_at)) = (
+                self.session
+                    .current_session
+                    .as_mut()
+                    .filter(|session| session.id == chat_id),
+                original_updated_at,
+            ) {
+                session.updated_at = updated_at;
+            }
+        }
+        self.refresh_current_session_tracking();
+    }}
+impl AppState {
+    fn current_worker_response(&mut self, chat_id: &str) -> Option<String> {
+        if let Some(response) = self
+            .worker
+            .cached_response(chat_id)
+            .map(str::to_string)
+            .filter(|response| !response.is_empty())
+        {
+            return Some(response);
+        }
+
+        let response = read_worker_response(chat_id);
+        if response.is_empty() {
+            return None;
+        }
+
+        self.worker
+            .cache_response_snapshot(chat_id, response.clone());
+        Some(response)
     }}
 impl AppState {
     fn update_session_in_memory<F>(&mut self, session_id: &str, f: F) -> Option<ChatSession>

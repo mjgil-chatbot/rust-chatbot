@@ -187,6 +187,30 @@ impl AppState {
         true
     }}
 impl AppState {
+    fn begin_session_load(&mut self, session_id: String) -> bool {
+        self.session.ui_io.cancel_pending_create_session();
+        let is_current_chat = self
+            .session
+            .current_session
+            .as_ref()
+            .map(|session| session.id == session_id)
+            .unwrap_or(false);
+        self.session.selected_session_id = Some(session_id.clone());
+        self.session.loading_session_id = if is_current_chat {
+            None
+        } else {
+            if let Some(cached_session) = self.session.cached_session(&session_id) {
+                debug!(
+                    session_id=%session_id,
+                    "activating cached session before async reload"
+                );
+                self.set_current_session(cached_session);
+            }
+            Some(session_id)
+        };
+        is_current_chat
+    }}
+impl AppState {
     fn mark_sidebar_session_load_complete(&mut self, completed_session_id: Option<&str>) {
         let Some(completed_session_id) = completed_session_id else {
             return;
@@ -216,6 +240,64 @@ impl AppState {
                 .current_session
                 .as_ref()
                 .map(|session| session.id.clone());
+        }
+    }}
+impl AppState {
+    fn handle_ui_action(&mut self, action: AppUiAction) {
+        match action {
+            AppUiAction::SubmitMessage => {
+                if let Err(err) = self.send_message() {
+                    warn!(error = %err, "submit message action failed");
+                }
+            }
+            AppUiAction::StopCurrentProcess => {
+                self.stop_current_process();
+            }
+            AppUiAction::LoadSession(session_id) => {
+                let is_current_chat = self.begin_session_load(session_id.clone());
+                if !is_current_chat {
+                    self.spawn_load_session_async(session_id);
+                }
+            }
+            AppUiAction::CreateSession {
+                name,
+                system_prompt,
+            } => {
+                self.spawn_create_session_async(name, system_prompt);
+            }
+            AppUiAction::RenameSession {
+                session_id,
+                new_name,
+            } => {
+                self.spawn_rename_session_async(session_id, new_name);
+            }
+            AppUiAction::DeleteSession(session_id) => {
+                self.spawn_delete_session_async(session_id);
+            }
+            AppUiAction::SaveCurrentSystemPrompt {
+                session_id,
+                system_prompt,
+            } => {
+                let Some(session_to_save) = self.update_session_in_memory(&session_id, |session| {
+                    session.set_system_prompt(system_prompt.clone());
+                }) else {
+                    return;
+                };
+                let request_id = Some(self.session.ui_io.next_save_request_id());
+                self.spawn_save_session_async(session_to_save, false, request_id, true);
+            }
+            AppUiAction::SaveCurrentOmniForgeModel {
+                session_id,
+                model_id,
+            } => {
+                let Some(session_to_save) = self.update_session_in_memory(&session_id, |session| {
+                    session.omniforge_model_id = Some(model_id.clone());
+                }) else {
+                    return;
+                };
+                let request_id = Some(self.session.ui_io.next_save_request_id());
+                self.spawn_save_session_async(session_to_save, false, request_id, false);
+            }
         }
     }}
 impl AppState {

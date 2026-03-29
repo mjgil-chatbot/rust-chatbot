@@ -3,12 +3,12 @@ impl AppState {
         self.session.ui_io.pending_send_chat_ids.contains(chat_id)
             || self.worker.processing_chat_ids.contains(chat_id)
             || self.worker.pending_worker_pids.contains_key(chat_id)
-    }}
-impl AppState {
+    }
+
     fn can_control_running_job(&self, parent_pid: u32) -> bool {
         self.should_reconcile_job(parent_pid)
-    }}
-impl AppState {
+    }
+
     fn is_reconcile_leader(&self) -> bool {
         let our_pid = std::process::id();
         self.sync_shm
@@ -22,15 +22,15 @@ impl AppState {
             })
             .map(|leader_pid| leader_pid == our_pid)
             .unwrap_or(true)
-    }}
-impl AppState {
+    }
+
     fn should_reconcile_job(&self, parent_pid: u32) -> bool {
         let our_pid = std::process::id();
         parent_pid == our_pid
             || (parent_pid == 0 && self.is_reconcile_leader())
             || (!crate::sync::is_pid_alive(parent_pid) && self.is_reconcile_leader())
-    }}
-impl AppState {
+    }
+
     fn backfill_all_workspace_memory_async(&self) {
         if !memory::memory_enabled() {
             return;
@@ -46,8 +46,8 @@ impl AppState {
                 "failed to launch workspace-memory backfill helper"
             );
         }
-    }}
-impl AppState {
+    }
+
     fn preload_recent_sessions_in_background(&mut self, limit: usize) {
         let current_id = self
             .session
@@ -102,8 +102,74 @@ impl AppState {
                 }
             }
         });
-    }}
-impl AppState {
+    }
+
+    fn drain_session_preload(&mut self) {
+        let mut loaded_sessions = Vec::new();
+        let mut disconnected = false;
+
+        if let Some(rx) = self.session.session_preload_rx.as_ref() {
+            loop {
+                match rx.try_recv() {
+                    Ok(session) => loaded_sessions.push(session),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        for session in loaded_sessions {
+            let is_fresh = self
+                .session
+                .sessions
+                .iter()
+                .find(|info| info.id == session.id)
+                .map(|info| info.updated_at == session.updated_at)
+                .unwrap_or(false);
+            if is_fresh {
+                self.session
+                    .session_cache
+                    .insert(session.id.clone(), session);
+            }
+        }
+
+        if disconnected {
+            self.session.session_preload_rx = None;
+        }
+    }
+
+    fn drain_pending_session_post_load(&mut self) {
+        let Some(session_id) = self.session.pending_post_load_session_id.take() else {
+            return;
+        };
+        if !self.session.is_current_chat(&session_id) {
+            return;
+        }
+        let awaiting_cached_worker_state =
+            self.worker.is_chat_processing(&session_id)
+                && self.current_worker_response(&session_id).is_none();
+        if awaiting_cached_worker_state {
+            self.session.pending_post_load_session_id = Some(session_id);
+            return;
+        }
+        self.hydrate_current_session_from_active_worker();
+    }
+
+    fn cached_session(&self, session_id: &str) -> Option<ChatSession> {
+        let session = self.session.session_cache.get(session_id)?;
+        let is_fresh = self
+            .session
+            .sessions
+            .iter()
+            .find(|info| info.id == session_id)
+            .map(|info| info.updated_at == session.updated_at)
+            .unwrap_or(false);
+        is_fresh.then(|| session.clone())
+    }
+
     pub(crate) fn refresh_session_search_in_background(&mut self) {
         let query = self.session.search_filter.trim().to_string();
         self.session.search_results_query = (!query.is_empty()).then_some(query.clone());
@@ -134,8 +200,8 @@ impl AppState {
                 matched_session_ids,
             });
         });
-    }}
-impl AppState {
+    }
+
     fn drain_session_search_results(&mut self) {
         let result = self
             .session
@@ -154,8 +220,8 @@ impl AppState {
             }
             self.session.search_results_rx = None;
         }
-    }}
-impl AppState {
+    }
+
     fn index_memory_for_chat(&self, chat_id: &str, final_state: &str) {
         if !memory::memory_enabled() {
             return;
@@ -171,14 +237,14 @@ impl AppState {
                 "failed to launch workspace-memory index helper"
             );
         }
-    }}
-impl AppState {
+    }
+
     /// Whether *any* chat is being processed (for repaint scheduling).
     pub fn any_processing(&self) -> bool {
         !self.worker.processing_chat_ids.is_empty()
             || !self.session.ui_io.pending_send_chat_ids.is_empty()
-    }}
-impl AppState {
+    }
+
     /// Background repaint cadence while worker activity is ongoing.
     /// Local worker state is only polled every 100ms, so repainting faster
     /// than that mostly burns UI time without surfacing new information.
@@ -190,13 +256,13 @@ impl AppState {
         } else {
             None
         }
-    }}
-impl AppState {
+    }
+
     /// Whether a specific chat ID is the one being processed.
     pub fn is_chat_processing(&self, chat_id: &str) -> bool {
         self.worker.processing_chat_ids.contains(chat_id)
-    }}
-impl AppState {
+    }
+
     /// Whether the current chat has a live worker that this UI can stop.
     pub fn is_local_processing(&self) -> bool {
         let Some(session) = self.session.current_session.as_ref() else {
@@ -205,16 +271,16 @@ impl AppState {
 
         self.worker.local_processing_chat_ids.contains(&session.id)
             || self.worker.local_worker_pids.contains_key(&session.id)
-    }}
-impl AppState {
+    }
+
     pub fn is_current_chat(&self, chat_id: &str) -> bool {
         self.session
             .current_session
             .as_ref()
             .map(|session| session.id == chat_id)
             .unwrap_or(false)
-    }}
-impl AppState {
+    }
+
     /// Read new streaming events for a chat since the given byte offset.
     ///
     /// Returns `(events, text_output, new_offset)`.  The caller should
@@ -230,8 +296,8 @@ impl AppState {
         let (events, new_offset) = worker::read_events_since(chat_id, offset);
         let text = crate::stream::compute_output_from_events(&events);
         (events, text, new_offset)
-    }}
-impl AppState {
+    }
+
     /// Read all events for a chat from the beginning.
     ///
     /// Useful for one-shot reads or when the caller needs the full
@@ -240,8 +306,8 @@ impl AppState {
     pub fn read_all_worker_events(&self, chat_id: &str) -> Vec<crate::stream::StreamEvent> {
         let path = worker::events_path(chat_id);
         crate::stream::read_events(&path)
-    }}
-impl AppState {
+    }
+
     /// Read worker output with backward-compatible fallback.
     ///
     /// If a flat `output` file exists it is returned directly.  Otherwise
@@ -250,7 +316,9 @@ impl AppState {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn read_worker_output_compat(&self, chat_id: &str) -> String {
         worker::read_output(chat_id)
-    }}
+    }
+}
+
 #[cfg(test)]
 mod process_state_tests {
     use super::*;

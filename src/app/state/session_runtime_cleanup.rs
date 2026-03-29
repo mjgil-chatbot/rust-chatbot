@@ -17,6 +17,19 @@ impl AppState {
             .refresh_session_index(&self.worker.pending_delete_chat_ids)
     }}
 impl AppState {
+    pub(crate) fn load_first_available_session(&mut self) -> Result<()> {
+        let Some(session_id) = self
+            .session
+            .sessions
+            .first()
+            .map(|session| session.id.clone())
+        else {
+            self.clear_current_session();
+            return Ok(());
+        };
+        self.load_session(&session_id)
+    }}
+impl AppState {
     /// Whether the *currently viewed* chat session is being processed.
     /// Checks both the local tracking set and the mmap worker registry
     /// (authoritative source — catches workers spawned by other instances

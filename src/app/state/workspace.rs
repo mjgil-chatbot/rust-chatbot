@@ -4,21 +4,23 @@ impl SessionState {
             .as_ref()
             .and_then(|session| session.launched_from.clone())
             .or_else(|| self.workspace_dir.clone())
-    }}
-impl SessionState {
+    }
+
     pub(crate) fn workspace_selection_locked(&self) -> bool {
         self.current_session
             .as_ref()
             .map(|session| session.messages.iter().any(|message| message.is_user))
             .unwrap_or(false)
-    }}
-impl SessionState {
+    }
+
     pub(crate) fn runsc_selection_locked(&self) -> bool {
         self.current_session
             .as_ref()
             .map(|session| session.messages.iter().any(|message| message.is_user))
             .unwrap_or(false)
-    }}
+    }
+}
+
 impl AppState {
     fn next_path_resolution_request_id(&mut self) -> u64 {
         self.session.latest_path_resolution_request_id = self
@@ -26,8 +28,8 @@ impl AppState {
             .latest_path_resolution_request_id
             .saturating_add(1);
         self.session.latest_path_resolution_request_id
-    }}
-impl AppState {
+    }
+
     fn normalize_path_request(&mut self, request: PathResolutionRequest) {
         if cfg!(test) && self.session.ui_io.repaint_ctx.is_none() {
             let request_id = self.next_path_resolution_request_id();
@@ -48,8 +50,8 @@ impl AppState {
                 ctx.request_repaint();
             }
         });
-    }}
-impl AppState {
+    }
+
     pub(crate) fn drain_path_resolution_results(&mut self) {
         let Some(rx) = self.session.path_resolution_rx.take() else {
             return;
@@ -73,8 +75,8 @@ impl AppState {
                 );
             }
         }
-    }}
-impl AppState {
+    }
+
     fn handle_path_resolution_result(&mut self, result: PathResolutionResult) {
         if result.request_id < self.session.latest_path_resolution_request_id {
             return;
@@ -144,15 +146,15 @@ impl AppState {
                 }
             }
         }
-    }}
-impl AppState {
+    }
+
     fn clear_workspace_completion_state(&mut self) {
         self.session.workspace_completions.clear();
         self.session.workspace_completion_query = None;
         self.session.workspace_completion_rx = None;
         self.session.workspace_completion_started_at = None;
-    }}
-impl AppState {
+    }
+
     fn persist_workspace_history(&self) {
         if let Err(err) = crate::app::workspace_picker::save_provider_workspace_snapshot(
             self.session.provider,
@@ -165,8 +167,8 @@ impl AppState {
                 "failed to persist workspace history"
             );
         }
-    }}
-impl AppState {
+    }
+
     fn sync_workspace_state_from_current_session(&mut self) {
         if let Some(path) = self
             .session
@@ -189,8 +191,8 @@ impl AppState {
         self.session.workspace_input_text = self.session.workspace_dir.clone().unwrap_or_default();
         self.clear_workspace_completion_state();
         self.refresh_history();
-    }}
-impl AppState {
+    }
+
     pub(crate) fn drain_workspace_completion_results(&mut self) {
         let result = self
             .session
@@ -207,8 +209,8 @@ impl AppState {
             }
             self.session.workspace_completion_rx = None;
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn request_workspace_completion_refresh(&mut self) {
         let query = self.session.workspace_input_text.trim().to_string();
         if query.is_empty() {
@@ -244,8 +246,8 @@ impl AppState {
                 ctx.request_repaint();
             }
         });
-    }}
-impl AppState {
+    }
+
     pub(crate) fn workspace_completion_matches(&self) -> Vec<String> {
         if self.session.workspace_completion_query.as_deref()
             != Some(self.session.workspace_input_text.trim())
@@ -253,8 +255,8 @@ impl AppState {
             return Vec::new();
         }
         self.session.workspace_completions.clone()
-    }}
-impl AppState {
+    }
+
     pub(crate) fn autocomplete_workspace_input(&mut self) {
         if let Some(completed) = crate::app::workspace_picker::autocomplete_workspace_input_from_matches(
             &self.session.workspace_input_text,
@@ -268,14 +270,14 @@ impl AppState {
             self.session.workspace_input_text = completed;
             self.request_workspace_completion_refresh();
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn apply_workspace_input(&mut self) {
         self.normalize_path_request(PathResolutionRequest::ApplyWorkspaceInput {
             input: self.session.workspace_input_text.clone(),
         });
-    }}
-impl AppState {
+    }
+
     pub(crate) fn select_workspace_dir(&mut self, path: String) {
         if self.session.workspace_selection_locked() {
             self.layout.status_feedback = Some(UiStatusFeedback {
@@ -287,8 +289,8 @@ impl AppState {
         }
 
         self.normalize_path_request(PathResolutionRequest::SelectWorkspaceDir { path });
-    }}
-impl AppState {
+    }
+
     fn apply_workspace_dir_normalized(&mut self, normalized: String) {
         crate::app::workspace_picker::push_recent_dir(
             &mut self.session.workspace_recent_dirs,
@@ -318,18 +320,18 @@ impl AppState {
         }
 
         self.refresh_history();
-    }}
-impl AppState {
+    }
+
     pub(crate) fn apply_runsc_input(&mut self) {
         self.normalize_path_request(PathResolutionRequest::ApplyRunscInput {
             input: self.session.runsc_input_text.clone(),
         });
-    }}
-impl AppState {
+    }
+
     pub(crate) fn preview_runsc_input(&mut self, path: String) {
         self.normalize_path_request(PathResolutionRequest::PreviewRunscInput { path });
-    }}
-impl AppState {
+    }
+
     pub(crate) fn apply_runsc_image_input(&mut self) {
         let runsc_image = self.session.runsc_image_input_text.trim().to_string();
         self.session.runsc_image_input_text = runsc_image.clone();
@@ -347,12 +349,12 @@ impl AppState {
         if let Some(session) = session_to_save {
             self.spawn_save_session_async(session, false, None, false);
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn select_runsc_dir(&mut self, path: String) {
         self.normalize_path_request(PathResolutionRequest::SelectRunscDir { path });
-    }}
-impl AppState {
+    }
+
     fn apply_runsc_dir_normalized(&mut self, normalized: String) {
         let first_runsc_dir = self.session.runsc_dirs.is_empty();
         crate::app::workspace_picker::push_recent_dir(
@@ -395,15 +397,15 @@ impl AppState {
         if let Some(session) = session_to_save {
             self.spawn_save_session_async(session, false, None, false);
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn replace_runsc_dir(&mut self, existing_path: &str, replacement: String) {
         self.normalize_path_request(PathResolutionRequest::ReplaceRunscDir {
             existing_path: existing_path.to_string(),
             replacement,
         });
-    }}
-impl AppState {
+    }
+
     fn apply_replaced_runsc_dir(&mut self, existing_path: &str, normalized: String) {
         let Some(existing_index) = self
             .session
@@ -484,8 +486,8 @@ impl AppState {
         if let Some(session) = session_to_save {
             self.spawn_save_session_async(session, false, None, false);
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn remove_runsc_dir(&mut self, path: &str) {
         self.session.runsc_dirs.retain(|p| p != path);
 
@@ -503,7 +505,9 @@ impl AppState {
         if let Some(session) = session_to_save {
             self.spawn_save_session_async(session, false, None, false);
         }
-    }}
+    }
+}
+
 fn resolve_path_request(request_id: u64, request: PathResolutionRequest) -> PathResolutionResult {
     let normalized_path = match &request {
         PathResolutionRequest::ApplyWorkspaceInput { input } => {
@@ -531,6 +535,7 @@ fn resolve_path_request(request_id: u64, request: PathResolutionRequest) -> Path
         normalized_path,
     }
 }
+
 fn resolve_workspace_input_request(input: &str) -> Result<String, String> {
     let direct_match = crate::app::workspace_picker::normalize_workspace_input(input);
     match direct_match {
@@ -543,3 +548,7 @@ fn resolve_workspace_input_request(input: &str) -> Result<String, String> {
             }),
     }
 }
+
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod tests;

@@ -300,6 +300,64 @@ impl AppState {
             self.clear_current_session();
         }
     }}
+impl AppState {
+    pub(crate) fn apply_selected_session_reload(&mut self, load: SelectedSessionLoad) {
+        let SelectedSessionLoad {
+            sessions,
+            current_session,
+            requested_session_id,
+        } = load;
+        if let Some(sessions) = sessions {
+            self.apply_sidebar_patch(SessionListPatch { sessions });
+        }
+
+        if let Some(current_session) = current_session {
+            let targeted_session_id = requested_session_id
+                .as_deref()
+                .or(Some(current_session.id.as_str()));
+
+            // Guard: if an optimistic assistant draft is active for the chat
+            // currently showing in the main panel, do not let a passive
+            // SelectedSessionLoad replace the in-memory session — the draft
+            // signals that a local send is in flight and the in-memory state
+            // is authoritative. Defense-in-depth; routing should already
+            // prevent passive refreshes from producing SelectedSessionLoad,
+            // but this guards against stale loads arriving just after send.
+            let is_draft_active_for_current = self
+                .session
+                .current_session
+                .as_ref()
+                .filter(|existing| Some(existing.id.as_str()) == targeted_session_id)
+                .is_some_and(|existing| self.session.has_pending_draft_for(&existing.id));
+            if is_draft_active_for_current {
+                debug!(
+                    session_id = %current_session.id,
+                    "skipping SelectedSessionLoad replacement: pending draft active"
+                );
+                return;
+            }
+
+            // Don't regress the in-memory session to an older disk version.
+            // This guards against stale snapshots from pre-completion reloads
+            // (e.g. StreamBegin) that finish late and arrive after the worker
+            // has already written the final message into memory.
+            let should_replace = self
+                .session
+                .current_session
+                .as_ref()
+                .filter(|existing| Some(existing.id.as_str()) == targeted_session_id)
+                .map(|existing| session_reload_is_safe(existing, &current_session))
+                .unwrap_or(true);
+            if should_replace {
+                self.set_current_session(current_session);
+            } else {
+                debug!(
+                    session_id = %current_session.id,
+                    "skipping SelectedSessionLoad replacement: divergent snapshot is not a safe transcript match"
+                );
+            }
+        }
+    }}
 include!("ui_io_async_impl.rs");
 #[cfg(test)]
 #[path = "ui_io_tests.rs"]
