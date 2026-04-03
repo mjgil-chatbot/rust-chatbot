@@ -80,6 +80,19 @@ pub(crate) fn default_workspace_dir() -> Option<String> {
         .ok()
         .map(|path| path.to_string_lossy().into_owned())
 }
+pub(crate) fn collapse_home_prefix(path: &str) -> String {
+    let Some(home) = dirs::home_dir() else {
+        return path.to_string();
+    };
+    let home = home.to_string_lossy().into_owned();
+    if path == home {
+        "~".to_string()
+    } else if let Some(rest) = path.strip_prefix(format!("{home}/").as_str()) {
+        format!("~/{rest}")
+    } else {
+        path.to_string()
+    }
+}
 pub(crate) fn normalize_workspace_input(input: &str) -> Result<String> {
     let trimmed = input.trim();
     anyhow::ensure!(!trimmed.is_empty(), "workspace path is empty");

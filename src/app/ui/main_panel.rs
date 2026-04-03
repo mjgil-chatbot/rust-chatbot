@@ -7,13 +7,11 @@ use eframe::egui;
 use rust_debug::tracing::{error, info};
 use std::sync::{mpsc::TryRecvError, OnceLock};
 use std::time::Instant;
-use crate::app::state::AppEvent;
-use crate::app::state::AppState;
-use crate::app::state::AppUiAction;
-use crate::app::state::LayoutLogFeedback;
+use crate::app::state::{AppEvent, AppState, AppUiAction, HeightCacheScan, LayoutLogFeedback};
 use crate::config;
 #[cfg(test)]
 mod flow_tests;
+mod header;
 #[derive(Clone)]
 pub(crate) struct LayoutSnapshot {
     pub(crate) viewport_rect: egui::Rect,
