@@ -12,4 +12,5 @@ pub(crate) mod layout_log;
 pub mod main_panel;
 pub mod message;
 pub(crate) mod message_list;
+pub mod side_panel;
 mod transcript_summary;

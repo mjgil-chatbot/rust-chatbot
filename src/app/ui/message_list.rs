@@ -4,9 +4,11 @@
 //! row rendering, height-cache synchronization, and scroll-offset adjustment.
 
 use std::time::{Duration, Instant};
+
 use chrono::Utc;
 use eframe::egui;
 use rust_debug::tracing::error;
+
 use crate::app::state::AppState;
 use crate::app::ui::main_panel::{MessageAreaSnapshot, MessageRowSnapshot};
 use crate::app::ui::message;
@@ -15,12 +17,18 @@ use crate::data::{
     height_cache_width_key, resolve_height_cache_entry, DataManager, HeightCacheEntry,
     SessionHeightCache, SESSION_HEIGHT_CACHE_VERSION,
 };
+
 #[cfg(test)]
 static FORCE_SYNC_HEIGHT_CACHE_SAVE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
 mod height_seed;
+#[cfg(test)]
+mod tests;
 mod timing;
+
 use self::height_seed::seed_message_height_cache_if_needed;
+
 const MESSAGE_OVERSCAN_PX: f32 = 200.0;
 const DEFAULT_MESSAGE_ROW_HEIGHT: f32 = 140.0;
 const MIN_MESSAGE_ROW_HEIGHT: f32 = 28.0;
@@ -30,25 +38,31 @@ const HEIGHT_SCAN_STEP_RATIO: f32 = 0.8;
 const HEIGHT_SCAN_MIN_STEP: f32 = 120.0;
 const HEIGHT_SCAN_END_EPSILON: f32 = 1.0;
 const DEFAULT_SLOW_RENDER_WARN_THRESHOLD: Duration = Duration::from_millis(50);
+
 pub(super) fn inter_message_spacing(ui: &egui::Ui) -> f32 {
     ui.text_style_height(&egui::TextStyle::Body) * 2.0
 }
+
 #[cfg(test)]
 pub(crate) struct SyncHeightCacheSaveGuard {
     previous: bool,
 }
+
 #[cfg(test)]
 impl SyncHeightCacheSaveGuard {
     pub(crate) fn enable() -> Self {
         let previous = FORCE_SYNC_HEIGHT_CACHE_SAVE.swap(true, std::sync::atomic::Ordering::SeqCst);
         Self { previous }
-    }}
+    }
+}
+
 #[cfg(test)]
 impl Drop for SyncHeightCacheSaveGuard {
     fn drop(&mut self) {
         FORCE_SYNC_HEIGHT_CACHE_SAVE.store(self.previous, std::sync::atomic::Ordering::SeqCst);
     }
 }
+
 /// Render the message list area
 pub(crate) fn render_message_area(
     ui: &mut egui::Ui,
@@ -464,6 +478,7 @@ pub(crate) fn render_message_area(
         max_rendered_overflow,
     })
 }
+
 pub(crate) fn render_empty_message_area(ui: &mut egui::Ui, session_id: &str) {
     let available_height = ui.available_height() - 80.0;
     let available_width = ui.available_width();
@@ -478,6 +493,7 @@ pub(crate) fn render_empty_message_area(ui: &mut egui::Ui, session_id: &str) {
             ui.set_width(available_width);
         });
 }
+
 fn sync_message_height_cache(state: &mut AppState, available_width: f32) {
     let Some((session_id, message_count)) = state
         .session
@@ -545,6 +561,7 @@ fn sync_message_height_cache(state: &mut AppState, available_width: f32) {
         }
     }
 }
+
 fn estimated_row_height(row_heights: &[f32]) -> f32 {
     if row_heights.is_empty() {
         return DEFAULT_MESSAGE_ROW_HEIGHT;
@@ -553,6 +570,7 @@ fn estimated_row_height(row_heights: &[f32]) -> f32 {
     let avg = row_heights.iter().copied().sum::<f32>() / row_heights.len() as f32;
     avg.clamp(80.0, 500.0)
 }
+
 fn resolve_scroll_adjustment(
     immediate_adjustment: f32,
     deferred_adjustment: f32,
@@ -574,6 +592,7 @@ fn resolve_scroll_adjustment(
         (None, 0.0)
     }
 }
+
 pub(crate) fn build_row_prefix_sums(row_heights: &[f32]) -> Vec<f32> {
     let mut prefix = Vec::with_capacity(row_heights.len() + 1);
     prefix.push(0.0);
@@ -586,6 +605,7 @@ pub(crate) fn build_row_prefix_sums(row_heights: &[f32]) -> Vec<f32> {
 
     prefix
 }
+
 fn cached_entry_default_height(entry: &HeightCacheEntry) -> Option<f32> {
     if entry.message_count > 0 && entry.total_height.is_finite() && entry.total_height > 0.0 {
         return Some((entry.total_height / entry.message_count as f32).clamp(80.0, 500.0));
@@ -598,6 +618,7 @@ fn cached_entry_default_height(entry: &HeightCacheEntry) -> Option<f32> {
         Some(avg.clamp(80.0, 500.0))
     }
 }
+
 pub(super) fn has_complete_height_cache_entry(
     cached_entry: Option<&HeightCacheEntry>,
     message_count: usize,
@@ -607,6 +628,7 @@ pub(super) fn has_complete_height_cache_entry(
         Some(entry) if entry.message_count == message_count && entry.row_heights.len() == message_count
     )
 }
+
 fn should_schedule_height_cache_save(
     cached_entry: Option<&HeightCacheEntry>,
     message_count: usize,
@@ -619,6 +641,7 @@ fn should_schedule_height_cache_save(
 
     cached_entry.is_some() && !has_complete_height_cache_entry(cached_entry, message_count)
 }
+
 fn persist_height_cache(provider: crate::model::ModelProvider, cache: SessionHeightCache) {
     #[cfg(test)]
     if FORCE_SYNC_HEIGHT_CACHE_SAVE.load(std::sync::atomic::Ordering::SeqCst) {
@@ -642,6 +665,8 @@ fn persist_height_cache(provider: crate::model::ModelProvider, cache: SessionHei
         }
     });
 }
+
+// ui-thread-guard: allow-blocking-start
 fn save_height_cache(
     provider: crate::model::ModelProvider,
     cache: &SessionHeightCache,
@@ -650,6 +675,8 @@ fn save_height_cache(
     data_manager.save_height_cache(cache)?;
     Ok(())
 }
+// ui-thread-guard: allow-blocking-end
+
 pub(crate) fn viewport_message_range(
     row_prefix: &[f32],
     viewport: egui::Rect,
@@ -674,6 +701,7 @@ pub(crate) fn viewport_message_range(
 
     (start_idx, end_idx)
 }
+
 fn lower_bound(values: &[f32], target: f32) -> usize {
     let mut left = 0;
     let mut right = values.len();
@@ -689,6 +717,7 @@ fn lower_bound(values: &[f32], target: f32) -> usize {
 
     left
 }
+
 pub(crate) fn should_show_pending_draft(
     is_processing: bool,
     pending_draft_chat_id: Option<&str>,
@@ -702,6 +731,7 @@ pub(crate) fn should_show_pending_draft(
         _ => false,
     }
 }
+
 fn preview_text(text: &str, max_len: usize) -> String {
     let mut out = String::new();
     let mut count = 0;

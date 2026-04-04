@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::ui::{dialogs, side_panel};
 use std::ffi::OsString;
 use std::time::Duration as StdDuration;
 use tempfile::TempDir;
@@ -26,4 +27,22 @@ fn test_raw_input() -> egui::RawInput {
         egui::vec2(1280.0, 900.0),
     ));
     raw_input
+}
+fn render_root_frame(
+    ctx: &egui::Context,
+    raw_input: egui::RawInput,
+    state: &mut AppState,
+) -> egui::FullOutput {
+    ctx.run(raw_input, |ctx| {
+        side_panel::panel_config().show(ctx, |ui| {
+            side_panel::render(ui, state);
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            super::render(ui, state);
+        });
+
+        dialogs::render_new_session_dialog(ctx, state);
+        dialogs::render_rename_session_dialog(ctx, state);
+    })
 }

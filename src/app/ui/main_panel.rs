@@ -8,7 +8,9 @@ use rust_debug::tracing::{error, info};
 use std::sync::{mpsc::TryRecvError, OnceLock};
 use std::time::Instant;
 use crate::app::state::{AppEvent, AppState, AppUiAction, HeightCacheScan, LayoutLogFeedback};
+use crate::app::ui::{layout_log, message_list};
 use crate::config;
+use crate::data::height_cache_width_key;
 #[cfg(test)]
 mod flow_tests;
 mod header;
@@ -209,6 +211,186 @@ fn render_model_status(ui: &mut egui::Ui, state: &mut AppState) {
             }));
         }
     }
+}
+/// Render the main chat panel
+pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
+    drain_layout_log_completion(state);
+    let content_width = ui.available_width().min(config::CONTENT_MAX_WIDTH);
+    let content_height = ui.available_height();
+    let child_rect = egui::Rect::from_min_size(
+        ui.cursor().left_top(),
+        egui::vec2(content_width, content_height),
+    );
+    let mut content_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(child_rect)
+            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+    );
+    content_ui.set_clip_rect(ui.clip_rect().intersect(child_rect));
+    content_ui.set_min_width(content_width);
+    content_ui.set_max_width(content_width);
+    content_ui.set_width(content_width);
+
+    {
+        let ui = &mut content_ui;
+        let mut layout_snapshot = LayoutSnapshot::new(ui.ctx(), content_width);
+        layout_snapshot.main_available_width_start = ui.available_width();
+        let optimistic_create_session = optimistic_create_session_name(state).map(str::to_owned);
+        let create_session_transition = optimistic_create_session.is_some();
+
+        let width_key = height_cache_width_key(content_width);
+        let (can_compute, scan_active) = if create_session_transition {
+            (false, false)
+        } else {
+            match state.session.current_session.as_ref() {
+                Some(session) => {
+                    let can_compute = !session.messages.is_empty();
+                    let scan_active = state
+                        .layout
+                        .height_cache_scan
+                        .as_ref()
+                        .map(|scan| scan.session_id == session.id && scan.width_key == width_key)
+                        .unwrap_or(false);
+                    (can_compute, scan_active)
+                }
+                None => (false, false),
+            }
+        };
+        let header_cache_info = HeaderHeightCacheInfo {
+            width_key,
+            scan_active,
+            can_compute,
+        };
+
+        clamp_content_width(ui, content_width);
+        layout_snapshot.header_rect = Some(header::render_header(
+            ui,
+            state,
+            header_cache_info,
+            auto_ui_debug_enabled(),
+            optimistic_create_session.as_deref(),
+        ));
+        render_panel_separator(ui, content_width);
+        clamp_content_width(ui, content_width);
+
+        if !create_session_transition && state.session.show_system_prompt {
+            layout_snapshot.system_prompt_rect = Some(render_system_prompt_area(ui, state));
+            ui.add_space(5.0);
+            clamp_content_width(ui, content_width);
+        }
+
+        if !create_session_transition && state.layout.show_json_summary {
+            if state.layout.current_json_summary_full.is_none() {
+                state.layout.current_json_summary_full = state
+                    .session
+                    .current_session
+                    .as_ref()
+                    .and_then(|session| session.json_summary.clone());
+            }
+            layout_snapshot.json_summary_rect = Some(summary::render_json_summary_area(
+                ui,
+                state.layout.current_json_summary_full.as_ref(),
+            ));
+            ui.add_space(5.0);
+            clamp_content_width(ui, content_width);
+        }
+
+        let body_rect = egui::Rect::from_min_size(
+            ui.cursor().left_top(),
+            egui::vec2(content_width, ui.available_height()),
+        );
+        let mut body_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(body_rect)
+                .layout(egui::Layout::top_down(egui::Align::LEFT)),
+        );
+        body_ui.set_clip_rect(ui.clip_rect().intersect(body_rect));
+        clamp_content_width(&mut body_ui, content_width);
+
+        if create_session_transition {
+            message_list::render_empty_message_area(&mut body_ui, "pending_create_message_scroll");
+            render_panel_separator(&mut body_ui, content_width);
+            clamp_content_width(&mut body_ui, content_width);
+            layout_snapshot.main_available_width_before_input = body_ui.available_width();
+            layout_snapshot.main_available_rect_before_input = body_ui.available_rect_before_wrap();
+            let input_snapshot = input::render_input_area(&mut body_ui, state, false);
+            layout_snapshot.input_rect = Some(input_snapshot.rect);
+            layout_snapshot.input_area = Some(input_snapshot);
+            input::handle_global_input(
+                &body_ui,
+                state,
+                false,
+                layout_snapshot
+                    .input_area
+                    .as_ref()
+                    .map(|snapshot| snapshot.input_focus_active)
+                    .unwrap_or(false),
+            );
+            clamp_content_width(&mut body_ui, content_width);
+            layout_snapshot.status_rect = Some(render_status_bar(&mut body_ui, state, true));
+        } else {
+            let capture_message_snapshot =
+                state.layout.pending_layout_log || auto_ui_debug_enabled();
+            layout_snapshot.message_area =
+                message_list::render_message_area(&mut body_ui, state, capture_message_snapshot);
+            emit_auto_ui_debug_trace(state, &layout_snapshot);
+            render_panel_separator(&mut body_ui, content_width);
+            clamp_content_width(&mut body_ui, content_width);
+            layout_snapshot.main_available_width_before_input = body_ui.available_width();
+            layout_snapshot.main_available_rect_before_input = body_ui.available_rect_before_wrap();
+            let input_snapshot = input::render_input_area(&mut body_ui, state, true);
+            layout_snapshot.input_rect = Some(input_snapshot.rect);
+            layout_snapshot.input_area = Some(input_snapshot);
+            input::handle_global_input(
+                &body_ui,
+                state,
+                true,
+                layout_snapshot
+                    .input_area
+                    .as_ref()
+                    .map(|snapshot| snapshot.input_focus_active)
+                    .unwrap_or(false),
+            );
+            clamp_content_width(&mut body_ui, content_width);
+            layout_snapshot.status_rect = Some(render_status_bar(&mut body_ui, state, false));
+        }
+
+        let body_used = body_ui.min_rect();
+        if body_used.is_positive() {
+            let final_rect = egui::Rect::from_min_size(
+                body_rect.min,
+                egui::vec2(content_width, body_used.height()),
+            );
+            ui.advance_cursor_after_rect(final_rect);
+        }
+
+        if state.layout.pending_layout_log {
+            layout_snapshot.viewport_rect = ui.ctx().screen_rect();
+            layout_snapshot.content_rect = ui.ctx().available_rect();
+            layout_snapshot.globally_used_rect = ui.ctx().used_rect();
+            layout_snapshot.pixels_per_point = ui.ctx().pixels_per_point();
+            let request = layout_log::capture_request(state, &layout_snapshot);
+            state.layout.layout_log_rx = Some(layout_log::spawn_write(request, ui.ctx().clone()));
+            state.layout.pending_layout_log = false;
+        }
+    }
+
+    let used = content_ui.min_rect();
+    if used.is_positive() {
+        let final_rect = egui::Rect::from_min_size(
+            child_rect.min,
+            egui::vec2(content_width, used.height().min(content_height)),
+        );
+        ui.advance_cursor_after_rect(final_rect);
+    }
+
+    let border_stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+    let left_border_x = ui.painter().round_to_pixel_center(child_rect.left()) - 1.0;
+    let right_border_x = ui.painter().round_to_pixel_center(child_rect.right());
+    ui.painter()
+        .vline(left_border_x, child_rect.y_range(), border_stroke);
+    ui.painter()
+        .vline(right_border_x, child_rect.y_range(), border_stroke);
 }
 fn drain_layout_log_completion(state: &mut AppState) {
     let Some(rx) = state.layout.layout_log_rx.take() else {
