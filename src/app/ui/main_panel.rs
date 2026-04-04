@@ -12,6 +12,8 @@ use crate::config;
 #[cfg(test)]
 mod flow_tests;
 mod header;
+mod input;
+mod summary;
 #[derive(Clone)]
 pub(crate) struct LayoutSnapshot {
     pub(crate) viewport_rect: egui::Rect,
