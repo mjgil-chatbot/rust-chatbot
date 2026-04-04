@@ -11,4 +11,5 @@ pub mod history_panel;
 pub(crate) mod layout_log;
 pub mod main_panel;
 pub mod message;
+pub(crate) mod message_list;
 mod transcript_summary;
