@@ -11,3 +11,4 @@ pub use chatbot_worker_core::{
 };
 pub mod memory_audit;
 pub mod memory_job;
+pub mod process_limits;
