@@ -10,3 +10,5 @@ pub mod dialogs;
 pub mod history_panel;
 pub(crate) mod layout_log;
 pub mod main_panel;
+pub mod message;
+mod transcript_summary;

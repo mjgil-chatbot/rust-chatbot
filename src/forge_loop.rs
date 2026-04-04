@@ -4,6 +4,12 @@ pub(crate) fn extract_continue_id(content: &str) -> Option<String> {
         .find_map(extract_continue_id_from_line)
         .map(str::to_string)
 }
+pub(crate) fn is_forge_plaintext_response(content: &str) -> bool {
+    let content = sanitize_stream_plaintext(content);
+    content
+        .lines()
+        .any(|line| is_transcript_status_line(line.trim_start()))
+}
 pub(crate) fn sanitize_stream_plaintext(content: &str) -> String {
     let mut sanitized_lines = Vec::new();
 
