@@ -22,4 +22,20 @@
 //!   chatbot-ctl broker-logs         Follow broker journal logs
 //!   chatbot-ctl stop-all            Stop UI instances + stop broker
 
+use std::fs;
+use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{self, Command};
+use anyhow::{Context, Result};
+use rust_debug::tracing::warn;
+include!("chatbot_ctl/helpers.rs");
+include!("chatbot_ctl/usage.rs");
+include!("chatbot_ctl/backup_scheduler.rs");
+include!("chatbot_ctl/commands.rs");
+include!("chatbot_ctl/broker.rs");
+include!("chatbot_ctl/messaging_send.rs");
+include!("chatbot_ctl/messaging.rs");
+include!("chatbot_ctl/desktop.rs");
+include!("chatbot_ctl/database.rs");
 fn main() {}
