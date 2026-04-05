@@ -285,6 +285,76 @@ fn backup_repo_root() -> Result<PathBuf> {
         .context("scripts directory should have a repo root parent")?;
     Ok(repo_root.to_path_buf())
 }
+fn other_profile_dir(current_dir: &Path) -> Option<(&'static str, PathBuf)> {
+    let current_profile = current_dir.file_name()?.to_str()?;
+    let other_profile = match current_profile {
+        "debug" => "release",
+        "release" => "debug",
+        _ => return None,
+    };
+    let target_dir = current_dir.parent()?;
+    if target_dir.file_name().and_then(|name| name.to_str()) != Some("target") {
+        return None;
+    }
+    Some((other_profile, target_dir.join(other_profile)))
+}
+fn binary_names_label(binary_names: &[&str]) -> String {
+    match binary_names {
+        [] => "binary".to_string(),
+        [name] => format!("`{name}`"),
+        _ => format!(
+            "one of {}",
+            binary_names
+                .iter()
+                .map(|name| format!("`{name}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+fn resolve_binary_in_current_profile(binary_names: &[&str]) -> Result<PathBuf> {
+    let current_exe = current_executable_path()?;
+    let current_dir = current_exe.parent().unwrap_or(Path::new("."));
+
+    for binary_name in binary_names {
+        let candidate = current_dir.join(binary_name);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    if let Some((other_profile, other_dir)) = other_profile_dir(current_dir) {
+        for binary_name in binary_names {
+            let mismatch = other_dir.join(binary_name);
+            if mismatch.exists() {
+                let current_profile = current_dir
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("current");
+                anyhow::bail!(
+                    "{} was not found in the current {} build directory {} for {}. Found only {} in {} instead; mixed-profile launches are not allowed.",
+                    binary_names_label(binary_names),
+                    current_profile,
+                    current_dir.display(),
+                    current_exe.display(),
+                    mismatch.display(),
+                    other_profile,
+                );
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "{} was not found alongside the current executable {} in {}. Build the companion binary in the same profile first.",
+        binary_names_label(binary_names),
+        current_exe.display(),
+        current_dir.display(),
+    );
+}
+fn exit_on_binary_resolution_error(err: anyhow::Error) -> PathBuf {
+    eprintln!("{err:#}");
+    process::exit(1);
+}
 fn pid_path() -> PathBuf {
     chatbot_lib::sync::broker_pid_path()
 }
