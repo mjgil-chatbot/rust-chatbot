@@ -9,6 +9,7 @@ pub use chatbot_worker_core::{
     provider_bridge, provider_catalog, storage, stream, summary, sync, worker, worker_ext,
     worker_process, workspace, AgentRole, AutonomousExecutionEnvironment, TEST_ENV_LOCK,
 };
+pub mod cgroup;
 pub mod memory_audit;
 pub mod memory_job;
 pub mod process_limits;

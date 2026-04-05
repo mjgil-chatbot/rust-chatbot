@@ -29,6 +29,8 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use anyhow::{Context, Result};
 use chatbot_lib::model::ModelProvider;
+use chatbot_lib::sync::{self, SyncShm};
+use chatbot_lib::worker::{self, WorkerJobSnapshot, WorkerRequest, WorkerState};
 use rust_debug::tracing::warn;
 include!("chatbot_ctl/helpers.rs");
 include!("chatbot_ctl/usage.rs");
