@@ -349,3 +349,6 @@ fn systemctl(args: &[&str]) -> bool {
         }
     }
 }
+fn systemctl_output(args: &[&str]) {
+    let _ = Command::new("systemctl").arg("--user").args(args).status();
+}
