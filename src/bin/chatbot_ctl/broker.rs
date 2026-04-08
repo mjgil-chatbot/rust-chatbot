@@ -21,6 +21,9 @@ fn cmd_stop_broker() {
 
     println!("Broker not running.");
 }
+fn cmd_broker_status() {
+    systemctl_output(&["status", SERVICE_NAME, "--no-pager"]);
+}
 fn cmd_broker_logs() {
     let _ = Command::new("journalctl")
         .args(["--user", "-u", SERVICE_NAME, "-f", "--no-pager"])
