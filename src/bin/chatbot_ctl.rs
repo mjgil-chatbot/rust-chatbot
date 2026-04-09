@@ -36,6 +36,9 @@ include!("chatbot_ctl/helpers.rs");
 include!("chatbot_ctl/usage.rs");
 include!("chatbot_ctl/backup_scheduler.rs");
 include!("chatbot_ctl/commands.rs");
+#[cfg(test)]
+#[path = "chatbot_ctl/commands_gc_tests.rs"]
+mod commands_gc_tests;
 include!("chatbot_ctl/broker.rs");
 include!("chatbot_ctl/messaging_send.rs");
 include!("chatbot_ctl/messaging.rs");
