@@ -340,6 +340,14 @@ fn cmd_stop_all() {
     cmd_stop(&[]);
     cmd_stop_broker();
 }
+fn ensure_broker_best_effort() {
+    if broker_health().is_running() {
+        return;
+    }
+    if systemd_unit_path().exists() {
+        let _ = systemctl(&["start", SERVICE_NAME]);
+    }
+}
 fn systemctl(args: &[&str]) -> bool {
     match Command::new("systemctl").arg("--user").args(args).status() {
         Ok(s) => s.success(),
