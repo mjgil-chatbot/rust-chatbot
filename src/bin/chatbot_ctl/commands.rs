@@ -1,3 +1,99 @@
+fn cmd_status() {
+    // ── Broker status ───────────────────────────────────────────
+    let health = broker_health();
+    println!("=== Broker ===");
+    if let Some(pid) = health.pid {
+        let status = if health.is_running() {
+            "RUNNING"
+        } else if health.pid_alive {
+            "DEGRADED (socket not connectable)"
+        } else {
+            "DOWN (process dead)"
+        };
+        let socket_str = if health.socket_ok { "ok" } else { "fail" };
+        println!("  PID {}  {}  (socket: {})", pid, status, socket_str);
+    } else {
+        let socket_str = if health.socket_ok {
+            "ok (no PID file)"
+        } else {
+            "not running"
+        };
+        println!("  {}", socket_str);
+    }
+
+    // ── Shared memory + instances ───────────────────────────────
+    if let Some(shm) = SyncShm::open_readonly() {
+        println!("\n=== Shared Memory ===");
+        println!("  version  : {}", shm.version());
+
+        let instances = shm.list_instances();
+        let live: Vec<_> = instances
+            .iter()
+            .filter(|i| sync::is_pid_alive(i.pid))
+            .collect();
+        let dead: Vec<_> = instances
+            .iter()
+            .filter(|i| !sync::is_pid_alive(i.pid) && i.pid != 0)
+            .collect();
+
+        println!(
+            "\n=== Instances ({} live, {} stale) ===",
+            live.len(),
+            dead.len()
+        );
+        for inst in &instances {
+            if inst.pid == 0 {
+                continue;
+            }
+            let alive = sync::is_pid_alive(inst.pid);
+            let status = if alive { "RUNNING" } else { "DEAD" };
+            println!(
+                "  PID {:>7}  {:>8}  {:>7}  started {}",
+                inst.pid,
+                inst.provider.as_str(),
+                status,
+                format_timestamp(inst.started_at),
+            );
+        }
+
+        if live.is_empty() && dead.is_empty() {
+            println!("  (none registered)");
+        }
+    } else {
+        println!("\n=== Instances ===\n  (no shared memory — no instances have run yet)");
+    }
+
+    // ── Worker status ──────────────────────────────────────────────
+    let workers = worker_jobs();
+    let active_workers: Vec<&WorkerJobSnapshot> =
+        workers.iter().filter(|w| worker_job_running(w)).collect();
+    let other_workers: Vec<&WorkerJobSnapshot> =
+        workers.iter().filter(|w| !worker_job_running(w)).collect();
+
+    println!(
+        "\n=== Workers ({} active, {} other) ===",
+        active_workers.len(),
+        other_workers.len()
+    );
+    for w in &workers {
+        let status = worker_job_status(w);
+        let elapsed = chrono::Utc::now().timestamp() - w.started_at;
+        let size_str = format_size(w.output_len);
+        let short_id = if w.chat_id.len() > 8 {
+            &w.chat_id[..8]
+        } else {
+            &w.chat_id
+        };
+        println!(
+            "  PID {:>7}  {:>8}  chat:{}  {:>7}  {}s  {}",
+            w.worker_pid, w.provider, short_id, status, elapsed, size_str,
+        );
+    }
+    if workers.is_empty() {
+        println!("  (none)");
+    }
+}
+
 fn format_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
@@ -7,6 +103,7 @@ fn format_size(bytes: u64) -> String {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }
+
 fn worker_jobs() -> Vec<WorkerJobSnapshot> {
     let mut jobs = match worker::list_job_states() {
         Ok(jobs) => jobs,
@@ -18,9 +115,11 @@ fn worker_jobs() -> Vec<WorkerJobSnapshot> {
     jobs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
     jobs
 }
+
 fn worker_job_running(job: &WorkerJobSnapshot) -> bool {
     job.state == WorkerState::Running && sync::is_pid_alive(job.worker_pid)
 }
+
 fn worker_job_status(job: &WorkerJobSnapshot) -> &'static str {
     if job.state == WorkerState::Running && !sync::is_pid_alive(job.worker_pid) {
         "DEAD"
@@ -28,6 +127,7 @@ fn worker_job_status(job: &WorkerJobSnapshot) -> &'static str {
         job.state.name()
     }
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GcCleanupTarget {
     chat_id: String,
@@ -35,6 +135,7 @@ struct GcCleanupTarget {
     worker_pid: Option<u32>,
     dir: PathBuf,
 }
+
 impl GcCleanupTarget {
     fn from_job(job: WorkerJobSnapshot) -> Self {
         Self {
@@ -43,8 +144,8 @@ impl GcCleanupTarget {
             worker_pid: Some(job.worker_pid),
             dir: worker::worker_dir(&job.chat_id),
         }
-    }}
-impl GcCleanupTarget {
+    }
+
     fn missing_state(chat_id: String, dir: PathBuf) -> Self {
         Self {
             chat_id,
@@ -52,7 +153,9 @@ impl GcCleanupTarget {
             worker_pid: None,
             dir,
         }
-    }}
+    }
+}
+
 fn collect_gc_targets() -> Vec<GcCleanupTarget> {
     let mut targets = collect_missing_state_gc_targets();
     targets.extend(
@@ -63,6 +166,7 @@ fn collect_gc_targets() -> Vec<GcCleanupTarget> {
     );
     targets
 }
+
 fn cleanup_gc_targets() -> Vec<GcCleanupTarget> {
     let targets = collect_gc_targets();
     for target in &targets {
@@ -72,6 +176,7 @@ fn cleanup_gc_targets() -> Vec<GcCleanupTarget> {
     }
     targets
 }
+
 fn worker_job_should_gc(job: &WorkerJobSnapshot) -> bool {
     match job.state {
         WorkerState::Running => !sync::is_pid_alive(job.worker_pid),
@@ -79,6 +184,7 @@ fn worker_job_should_gc(job: &WorkerJobSnapshot) -> bool {
         WorkerState::Free => false,
     }
 }
+
 fn collect_missing_state_gc_targets() -> Vec<GcCleanupTarget> {
     let entries = match fs::read_dir(worker::workers_dir()) {
         Ok(entries) => entries,
@@ -116,6 +222,7 @@ fn collect_missing_state_gc_targets() -> Vec<GcCleanupTarget> {
     targets.sort_by(|a, b| a.chat_id.cmp(&b.chat_id));
     targets
 }
+
 fn missing_state_gc_entry_is_transient(dir: &Path) -> bool {
     const STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -126,12 +233,14 @@ fn missing_state_gc_entry_is_transient(dir: &Path) -> bool {
         .filter_map(|modified| modified.elapsed().ok())
         .any(|elapsed| elapsed <= STARTUP_GRACE)
 }
+
 fn read_missing_state_gc_chat_id(dir: &Path) -> Option<String> {
     let json = fs::read_to_string(dir.join("request.json")).ok()?;
     serde_json::from_str::<WorkerRequest>(&json)
         .ok()
         .map(|request| request.chat_id)
 }
+
 fn cmd_pids() {
     let shm = match SyncShm::open_readonly() {
         Some(s) => s,
@@ -141,6 +250,7 @@ fn cmd_pids() {
         println!("{}", entry.pid);
     }
 }
+
 fn cmd_stop(pids_to_kill: &[u32]) {
     let shm = match SyncShm::open_readonly() {
         Some(s) => s,
@@ -196,6 +306,7 @@ fn cmd_stop(pids_to_kill: &[u32]) {
         }
     }
 }
+
 fn cmd_workers() {
     let workers = worker_jobs();
     if workers.is_empty() {
@@ -213,6 +324,7 @@ fn cmd_workers() {
         );
     }
 }
+
 fn cmd_restart_provider(provider: ModelProvider) {
     let prov = provider.as_str();
 
@@ -280,6 +392,7 @@ fn cmd_restart_provider(provider: ModelProvider) {
         println!("Restarted {prov}.");
     }
 }
+
 fn cmd_stop_workers(chat_id_filter: Option<&str>) {
     let workers = worker_jobs();
     let mut stopped = 0;
@@ -311,6 +424,7 @@ fn cmd_stop_workers(chat_id_filter: Option<&str>) {
         println!("No running workers to stop.");
     }
 }
+
 fn cmd_gc() {
     let cleaned = cleanup_gc_targets();
 
@@ -333,6 +447,7 @@ fn cmd_gc() {
         println!("Cleaned {} stale worker job(s).", cleaned.len());
     }
 }
+
 fn cmd_stop_all() {
     // Stop workers first
     cmd_stop_workers(None);
@@ -340,6 +455,67 @@ fn cmd_stop_all() {
     cmd_stop(&[]);
     cmd_stop_broker();
 }
+
+fn cmd_stop_provider(provider: ModelProvider) {
+    let prov = provider.as_str();
+    let shm = match SyncShm::open_readonly() {
+        Some(s) => s,
+        None => {
+            eprintln!("No shared memory region found. Falling back to signal-based stop...");
+            for pid in provider_pids_by_name(provider) {
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+                println!("Sent SIGTERM to PID {} ({prov})", pid);
+            }
+            return;
+        }
+    };
+
+    let instances = shm.list_instances();
+    let targets: Vec<u32> = instances
+        .iter()
+        .filter(|i| i.provider == provider && sync::is_pid_alive(i.pid))
+        .filter_map(|i| resolve_ui_instance_pid(i.pid))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    if targets.is_empty() {
+        println!("No running {prov} instances found.");
+        return;
+    }
+
+    for pid in &targets {
+        if sync::is_pid_alive(*pid) {
+            unsafe {
+                libc::kill(*pid as libc::pid_t, libc::SIGTERM);
+            }
+            println!("Sent SIGTERM to PID {} ({prov})", pid);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn provider_pids_by_name(provider: ModelProvider) -> Vec<u32> {
+    let output = match std::process::Command::new("pgrep")
+        .args(["-f", &format!("rust-chatbot.*{}", provider.as_str())])
+        .output()
+    {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&output)
+        .lines()
+        .filter_map(|l| l.parse().ok())
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn provider_pids_by_name(_provider: ModelProvider) -> Vec<u32> {
+    Vec::new()
+}
+
 fn ensure_broker_best_effort() {
     if broker_health().is_running() {
         return;
@@ -348,6 +524,9 @@ fn ensure_broker_best_effort() {
         let _ = systemctl(&["start", SERVICE_NAME]);
     }
 }
+
+// ── broker management via systemd ───────────────────────────────────
+
 fn systemctl(args: &[&str]) -> bool {
     match Command::new("systemctl").arg("--user").args(args).status() {
         Ok(s) => s.success(),
@@ -357,6 +536,7 @@ fn systemctl(args: &[&str]) -> bool {
         }
     }
 }
+
 fn systemctl_output(args: &[&str]) {
     let _ = Command::new("systemctl").arg("--user").args(args).status();
 }
