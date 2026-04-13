@@ -28,6 +28,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use anyhow::{Context, Result};
+use chatbot_lib::data::DataManager;
 use chatbot_lib::model::ModelProvider;
 use chatbot_lib::sync::{self, SyncShm};
 use chatbot_lib::worker::{self, WorkerJobSnapshot, WorkerRequest, WorkerState};
