@@ -35,6 +35,7 @@ mod app;
 mod common;
 mod document;
 mod forge_loop;
+mod inline;
 mod markdown;
 mod socket;
 use model::ModelProvider;
