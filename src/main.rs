@@ -33,6 +33,7 @@ pub use chatbot_lib::workspace;
 pub(crate) use chatbot_lib::TEST_ENV_LOCK;
 mod app;
 mod common;
+mod document;
 mod forge_loop;
 mod markdown;
 mod socket;
