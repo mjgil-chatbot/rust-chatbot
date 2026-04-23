@@ -2,13 +2,49 @@ use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
 use anyhow::{bail, Context, Result};
 use rust_debug::tracing::{info, warn};
+
 use crate::data::{ChatSession, DataManager};
 use crate::memory::{self, MemoryContext};
 use crate::model::ModelProvider;
 use crate::storage;
+
 const MEMORY_JOB_FLAG: &str = "--memory-job";
+
+enum MemoryJob {
+    Retrieve {
+        workspace_path: String,
+        query: String,
+    },
+    Backfill {
+        provider: ModelProvider,
+    },
+    IndexChat {
+        provider: ModelProvider,
+        chat_id: String,
+        final_state: String,
+    },
+}
+
+pub fn maybe_run_embedded_job_from_env() -> Option<i32> {
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() != Some(MEMORY_JOB_FLAG) {
+        return None;
+    }
+
+    let exit_code = match parse_memory_job(args).and_then(run_memory_job) {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("memory job failed: {err:#}");
+            1
+        }
+    };
+
+    Some(exit_code)
+}
+
 pub fn retrieve_memory_context_with_helper(
     workspace_path: &str,
     query: &str,
@@ -44,6 +80,7 @@ pub fn retrieve_memory_context_with_helper(
 
     serde_json::from_slice(&output.stdout).context("decode embedded memory retrieval response")
 }
+
 pub fn spawn_backfill_process(provider: ModelProvider) -> Result<()> {
     let provider_name = provider.as_str().to_string();
     spawn_background_memory_job(
@@ -70,6 +107,7 @@ pub fn spawn_backfill_process(provider: ModelProvider) -> Result<()> {
         )
     })
 }
+
 pub fn spawn_index_chat_process(
     provider: ModelProvider,
     chat_id: &str,
@@ -115,6 +153,7 @@ pub fn spawn_index_chat_process(
         )
     })
 }
+
 fn spawn_background_memory_job<F, G>(configure: F, fallback: G) -> Result<()>
 where
     F: FnOnce(&mut Command),
@@ -148,6 +187,7 @@ where
 
     Ok(())
 }
+
 fn memory_job_command() -> Result<Option<Command>> {
     let current_exe = current_executable_path()?;
     let Some(memory_job_exe) = resolve_memory_job_target(&current_exe)? else {
@@ -157,11 +197,13 @@ fn memory_job_command() -> Result<Option<Command>> {
     command.arg(MEMORY_JOB_FLAG);
     Ok(Some(command))
 }
+
 fn current_executable_path() -> Result<PathBuf> {
     let current_exe =
         std::env::current_exe().context("resolve current executable for memory job")?;
     Ok(current_exe.canonicalize().ok().unwrap_or(current_exe))
 }
+
 fn resolve_memory_job_binary_from(current_exe: &Path) -> Result<PathBuf> {
     if let Some(path) = resolve_memory_job_binary_from_cargo_env() {
         return Ok(path);
@@ -195,6 +237,7 @@ fn resolve_memory_job_binary_from(current_exe: &Path) -> Result<PathBuf> {
         current_exe.display()
     );
 }
+
 fn resolve_memory_job_binary_from_cargo_env() -> Option<PathBuf> {
     for env_name in [
         format!("CARGO_BIN_EXE_{}", crate::config::UI_BINARY_NAME),
@@ -212,6 +255,7 @@ fn resolve_memory_job_binary_from_cargo_env() -> Option<PathBuf> {
     }
     None
 }
+
 fn is_test_host_executable(current_exe: &Path) -> bool {
     current_exe
         .parent()
@@ -219,6 +263,7 @@ fn is_test_host_executable(current_exe: &Path) -> bool {
         .and_then(|name| name.to_str())
         == Some("deps")
 }
+
 fn resolve_memory_job_target(current_exe: &Path) -> Result<Option<PathBuf>> {
     match resolve_memory_job_binary_from(current_exe) {
         Ok(path) => Ok(Some(path)),
@@ -233,11 +278,167 @@ fn resolve_memory_job_target(current_exe: &Path) -> Result<Option<PathBuf>> {
         Err(err) => Err(err),
     }
 }
+
 fn push_unique_path(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !paths.iter().any(|existing| existing == &candidate) {
         paths.push(candidate);
     }
 }
+
+fn parse_memory_job<I>(args: I) -> Result<MemoryJob>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(command) = args.next() else {
+        bail!("missing memory job command");
+    };
+
+    match command.as_str() {
+        "retrieve" => parse_retrieve_job(args),
+        "backfill" => parse_backfill_job(args),
+        "index-chat" => parse_index_chat_job(args),
+        other => bail!("unknown memory job command: {other}"),
+    }
+}
+
+fn parse_retrieve_job<I>(args: I) -> Result<MemoryJob>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut workspace_path = None;
+    let mut query = None;
+    let mut args = args.into_iter();
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--workspace-path" => {
+                workspace_path = Some(require_flag_value(&mut args, "--workspace-path")?)
+            }
+            "--query" => query = Some(require_flag_value(&mut args, "--query")?),
+            other => bail!("unknown retrieve arg: {other}"),
+        }
+    }
+
+    Ok(MemoryJob::Retrieve {
+        workspace_path: require_flag(workspace_path, "--workspace-path")?,
+        query: require_flag(query, "--query")?,
+    })
+}
+
+fn parse_backfill_job<I>(args: I) -> Result<MemoryJob>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut provider = None;
+    let mut args = args.into_iter();
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--provider" => {
+                provider = Some(parse_provider(&require_flag_value(
+                    &mut args,
+                    "--provider",
+                )?)?)
+            }
+            other => bail!("unknown backfill arg: {other}"),
+        }
+    }
+
+    Ok(MemoryJob::Backfill {
+        provider: require_flag(provider, "--provider")?,
+    })
+}
+
+fn parse_index_chat_job<I>(args: I) -> Result<MemoryJob>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut provider = None;
+    let mut chat_id = None;
+    let mut final_state = None;
+    let mut args = args.into_iter();
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--provider" => {
+                provider = Some(parse_provider(&require_flag_value(
+                    &mut args,
+                    "--provider",
+                )?)?)
+            }
+            "--chat-id" => chat_id = Some(require_flag_value(&mut args, "--chat-id")?),
+            "--final-state" => final_state = Some(require_flag_value(&mut args, "--final-state")?),
+            other => bail!("unknown index-chat arg: {other}"),
+        }
+    }
+
+    Ok(MemoryJob::IndexChat {
+        provider: require_flag(provider, "--provider")?,
+        chat_id: require_flag(chat_id, "--chat-id")?,
+        final_state: require_flag(final_state, "--final-state")?,
+    })
+}
+
+fn require_flag<T>(value: Option<T>, flag: &str) -> Result<T> {
+    value.with_context(|| format!("missing required flag {flag}"))
+}
+
+fn require_flag_value<I>(args: &mut I, flag: &str) -> Result<String>
+where
+    I: Iterator<Item = String>,
+{
+    args.next()
+        .with_context(|| format!("missing value for {flag}"))
+}
+
+fn parse_provider(value: &str) -> Result<ModelProvider> {
+    ModelProvider::from_alias(value).with_context(|| format!("unknown provider {value}"))
+}
+
+fn run_memory_job(job: MemoryJob) -> Result<()> {
+    match job {
+        MemoryJob::Retrieve {
+            workspace_path,
+            query,
+        } => run_retrieve_job(&workspace_path, &query),
+        MemoryJob::Backfill { provider } => {
+            if let Err(err) = backfill_workspace_memory(provider) {
+                warn!(
+                    error=%err,
+                    provider=%provider.as_str(),
+                    "workspace-memory backfill helper failed"
+                );
+            }
+            Ok(())
+        }
+        MemoryJob::IndexChat {
+            provider,
+            chat_id,
+            final_state,
+        } => {
+            if let Err(err) = index_memory_for_chat(provider, &chat_id, &final_state) {
+                warn!(
+                    error=%err,
+                    provider=%provider.as_str(),
+                    chat_id=%chat_id,
+                    "workspace-memory index helper failed"
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_retrieve_job(workspace_path: &str, query: &str) -> Result<()> {
+    let context = memory::retrieve_memory_context(workspace_path, query)?;
+    serde_json::to_writer(io::stdout(), &context).context("write memory retrieval response")?;
+    io::stdout()
+        .write_all(b"\n")
+        .context("terminate memory retrieval response")?;
+    Ok(())
+}
+
 fn backfill_workspace_memory(provider: ModelProvider) -> Result<()> {
     if !memory::memory_enabled() {
         return Ok(());
@@ -333,6 +534,7 @@ fn backfill_workspace_memory(provider: ModelProvider) -> Result<()> {
 
     Ok(())
 }
+
 fn index_memory_for_chat(provider: ModelProvider, chat_id: &str, final_state: &str) -> Result<()> {
     if !memory::memory_enabled() {
         return Ok(());
@@ -367,6 +569,7 @@ fn index_memory_for_chat(provider: ModelProvider, chat_id: &str, final_state: &s
     );
     Ok(())
 }
+
 fn load_sessions_for_workspace(
     data_manager: &DataManager,
     provider: ModelProvider,
@@ -407,12 +610,14 @@ fn load_sessions_for_workspace(
 
     Ok(sessions)
 }
+
 fn indexed_workspaces(provider: ModelProvider) -> Option<Vec<storage::IndexedWorkspace>> {
     let index = storage::get_index()?;
     let conn = index.connection();
     let workspaces = storage::list_workspaces_from_index(&conn, provider.as_str()).ok()?;
     (!workspaces.is_empty()).then_some(workspaces)
 }
+
 fn load_sessions_for_workspace_id(
     data_manager: &DataManager,
     provider: ModelProvider,
@@ -426,6 +631,7 @@ fn load_sessions_for_workspace_id(
     drop(conn);
     load_sessions_by_id(data_manager, &session_ids)
 }
+
 fn load_sessions_by_id(
     data_manager: &DataManager,
     session_ids: &[String],
@@ -445,6 +651,7 @@ fn load_sessions_by_id(
     }
     Ok(sessions)
 }
+
 fn index_workspace_sessions_logged(
     workspace: &str,
     sessions: &[ChatSession],
@@ -500,3 +707,7 @@ fn index_workspace_sessions_logged(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "memory_job_tests.rs"]
+mod tests;
