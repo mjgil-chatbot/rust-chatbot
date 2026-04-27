@@ -14,3 +14,4 @@ pub mod memory_audit;
 pub mod memory_job;
 pub mod memory_mcp;
 pub mod process_limits;
+pub mod session_mcp;
