@@ -19,6 +19,7 @@ use crate::memory;
 use crate::model::ModelProvider;
 use crate::socket::SocketHandle;
 use crate::socket::SyncEvent;
+use crate::socket::WireMessage;
 use crate::summary::{JsonSummary, JsonSummaryPreview};
 use crate::sync::SyncShm;
 use crate::worker::{self, WorkerResult, WorkerState};

@@ -101,6 +101,20 @@ impl AppState {
         self.poll_history_sync();
     }}
 impl AppState {
+    pub(crate) fn request_history_enable(&mut self) {
+        let Some(workspace_root) = self.session.effective_workspace_dir() else {
+            self.session.history.reset_for_missing_workspace();
+            return;
+        };
+        let Some(chat) = self.session.current_session.clone() else {
+            return;
+        };
+        self.spawn_history_refresh_async(HistoryRefreshRequest {
+            key: history_request_key(&workspace_root, Some(&chat), true),
+            chat: Some(chat),
+        });
+    }}
+impl AppState {
     fn spawn_history_refresh_async(&mut self, request: HistoryRefreshRequest) {
         if self.session.history.refresh_in_flight {
             return;
@@ -125,6 +139,104 @@ impl AppState {
                 ctx.request_repaint();
             }
         });
+    }}
+impl AppState {
+    fn drain_history_results(&mut self) {
+        let refresh_result = self
+            .session
+            .history
+            .refresh_rx
+            .as_ref()
+            .map(|rx| rx.try_recv());
+        match refresh_result {
+            Some(Ok(Ok(result))) => {
+                self.session.history.refresh_in_flight = false;
+                background_timing::finish_background_channel_timing(
+                    "history_refresh",
+                    &mut self.session.history.refresh_started_at,
+                );
+                self.session.history.refresh_rx = None;
+                self.session
+                    .history
+                    .set_snapshot(result.key, result.snapshot);
+            }
+            Some(Ok(Err((key, error)))) => {
+                self.session.history.refresh_in_flight = false;
+                background_timing::finish_background_channel_timing(
+                    "history_refresh",
+                    &mut self.session.history.refresh_started_at,
+                );
+                self.session.history.refresh_rx = None;
+                let snapshot = HistorySnapshot {
+                    workspace_root: self.session.effective_workspace_dir(),
+                    error: Some(error),
+                    ..HistorySnapshot::default()
+                };
+                self.session.history.set_snapshot(key, snapshot);
+            }
+            Some(Err(TryRecvError::Disconnected)) => {
+                self.session.history.refresh_in_flight = false;
+                background_timing::finish_background_channel_timing(
+                    "history_refresh",
+                    &mut self.session.history.refresh_started_at,
+                );
+                self.session.history.refresh_rx = None;
+                let key = self.session.history.last_request_key.clone().unwrap_or_else(|| {
+                    history_request_key(
+                        self.session.effective_workspace_dir().as_deref().unwrap_or_default(),
+                        None,
+                        false,
+                    )
+                });
+                let snapshot = HistorySnapshot {
+                    workspace_root: self.session.effective_workspace_dir(),
+                    error: Some("History refresh stopped unexpectedly.".to_string()),
+                    ..HistorySnapshot::default()
+                };
+                self.session.history.set_snapshot(key, snapshot);
+            }
+            Some(Err(TryRecvError::Empty)) | None => {}
+        }
+
+        let checkpoint_result = self
+            .session
+            .history
+            .checkpoint_rx
+            .as_ref()
+            .map(|rx| rx.try_recv());
+        match checkpoint_result {
+            Some(Ok(Ok(result))) => {
+                self.session.history.checkpoint_in_flight = false;
+                self.session.history.checkpoint_rx = None;
+                self.layout.status_feedback = Some(UiStatusFeedback {
+                    at: Instant::now(),
+                    is_error: false,
+                    message: result.success_message,
+                });
+                self.session.history.show_checkpoint_dialog = false;
+                self.session.history.checkpoint_name.clear();
+                self.request_history_enable();
+            }
+            Some(Ok(Err(error))) => {
+                self.session.history.checkpoint_in_flight = false;
+                self.session.history.checkpoint_rx = None;
+                self.layout.status_feedback = Some(UiStatusFeedback {
+                    at: Instant::now(),
+                    is_error: true,
+                    message: format!("History checkpoint failed: {error}"),
+                });
+            }
+            Some(Err(TryRecvError::Disconnected)) => {
+                self.session.history.checkpoint_in_flight = false;
+                self.session.history.checkpoint_rx = None;
+                self.layout.status_feedback = Some(UiStatusFeedback {
+                    at: Instant::now(),
+                    is_error: true,
+                    message: "History checkpoint stopped unexpectedly.".to_string(),
+                });
+            }
+            Some(Err(TryRecvError::Empty)) | None => {}
+        }
     }}
 impl AppState {
     fn poll_history_sync(&mut self) {

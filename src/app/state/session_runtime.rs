@@ -8,8 +8,8 @@ impl SessionState {
             self.session_cache.sync_current(session);
         }
         self.upsert_session_info_entry(session_info);
-    }}
-impl SessionState {
+    }
+
     fn sync_current_view(&mut self, layout: &mut LayoutState) {
         self.system_prompt_text = self
             .current_session
@@ -49,8 +49,8 @@ impl SessionState {
             let commands = discover_slash_commands(provider, working_dir.as_deref());
             let _ = tx.send(commands);
         });
-    }}
-impl SessionState {
+    }
+
     fn store_current_session(&mut self, session: ChatSession, layout: &mut LayoutState) -> String {
         let session_id = session.id.clone();
         self.current_session = Some(session);
@@ -59,8 +59,8 @@ impl SessionState {
         }
         self.sync_current_view(layout);
         session_id
-    }}
-impl SessionState {
+    }
+
     fn clear_current_view(&mut self, layout: &mut LayoutState) {
         self.current_session = None;
         self.system_prompt_text.clear();
@@ -69,8 +69,8 @@ impl SessionState {
         self.runsc_image_input_text.clear();
         layout.current_json_summary_preview = None;
         layout.current_json_summary_full = None;
-    }}
-impl SessionState {
+    }
+
     fn apply_stream_to_current(
         &mut self,
         chat_id: &str,
@@ -99,8 +99,8 @@ impl SessionState {
             self.clear_pending_draft_if_matches(chat_id);
         }
         response_changed
-    }}
-impl SessionState {
+    }
+
     fn take_session_for_update(&mut self, session_id: &str) -> Result<Option<(ChatSession, bool)>> {
         if self.is_current_chat(session_id) {
             return Ok(self.current_session.take().map(|session| (session, true)));
@@ -112,8 +112,8 @@ impl SessionState {
         data_manager
             .load_session(session_id)
             .map(|session| Some((session, false)))
-    }}
-impl SessionState {
+    }
+
     fn commit_session_update(
         &mut self,
         session: ChatSession,
@@ -135,8 +135,8 @@ impl SessionState {
 
         self.upsert_session_info(&session);
         self.session_cache.insert(session.id.clone(), session);
-    }}
-impl SessionState {
+    }
+
     fn refresh_session_index(&mut self, pending_delete_chat_ids: &HashSet<String>) -> Result<()> {
         if let Some(ref data_manager) = self.data_manager {
             let fresh = data_manager.list_sessions()?;
@@ -188,7 +188,9 @@ impl SessionState {
             self.session_cache.clear();
         }
         Ok(())
-    }}
+    }
+}
+
 impl AppWorkerState {
     fn start_response_logging(&mut self, chat_id: &str, response: &str) -> bool {
         if response.is_empty() || self.response_started_chat_ids.contains(chat_id) {
@@ -197,23 +199,27 @@ impl AppWorkerState {
 
         self.response_started_chat_ids.insert(chat_id.to_string());
         true
-    }}
-impl AppWorkerState {
+    }
+
     fn finish_response_logging(&mut self, chat_id: &str) -> bool {
         self.response_started_chat_ids.remove(chat_id)
-    }}
+    }
+}
+
 impl LayoutState {
     fn clear_session_artifacts(&mut self, session_id: &str) {
         self.session_height_cache.remove(session_id);
         if self.pending_height_cache_save.as_deref() == Some(session_id) {
             self.pending_height_cache_save = None;
         }
-    }}
+    }
+}
+
 impl AppState {
     pub(crate) fn refresh_current_session_tracking(&mut self) {
         self.session.refresh_current_tracking();
-    }}
-impl AppState {
+    }
+
     pub(crate) fn set_current_session(&mut self, session: ChatSession) {
         debug!(
             session_id=%session.id,
@@ -241,19 +247,19 @@ impl AppState {
         self.refresh_mcp_config_status_in_background();
         self.spawn_height_cache_load_for_session(session_id.clone());
         self.session.pending_post_load_session_id = Some(session_id);
-    }}
-impl AppState {
+    }
+
     fn clear_current_session(&mut self) {
         self.session.clear_current_view(&mut self.layout);
         self.session.system_prompt_dirty = false;
         self.session.system_prompt_dirty_session_id = None;
         self.session.workspace_input_text = self.session.workspace_dir.clone().unwrap_or_default();
-    }}
-impl AppState {
+    }
+
     fn reload_current_session_from_disk(&mut self, session_id: &str) {
         self.spawn_reload_current_session_async(session_id.to_string());
-    }}
-impl AppState {
+    }
+
     fn sync_current_session_from_disk_if_safe(&mut self, chat_id: &str) -> bool {
         let current_snapshot = self.session.current_session.as_ref().map(|session| {
             (
@@ -364,8 +370,8 @@ impl AppState {
             "skip current-session disk sync: current in-memory session is newer than disk"
         );
         false
-    }}
-impl AppState {
+    }
+
     fn sync_current_session_from_disk_for_stream_begin(&mut self, chat_id: &str) -> bool {
         let current_snapshot = self.session.current_session.as_ref().map(|session| {
             (
@@ -450,8 +456,8 @@ impl AppState {
         }
 
         false
-    }}
-impl AppState {
+    }
+
     fn handle_remote_stream_terminal_update(
         &mut self,
         chat_id: &str,
@@ -516,8 +522,8 @@ impl AppState {
 
         self.refresh_current_session_tracking();
         self.layout.should_focus_input = true;
-    }}
-impl AppState {
+    }
+
     fn hydrate_current_session_from_active_worker(&mut self) {
         let Some(chat_id) = self
             .session
@@ -555,8 +561,8 @@ impl AppState {
             }
         }
         self.refresh_current_session_tracking();
-    }}
-impl AppState {
+    }
+
     fn current_worker_response(&mut self, chat_id: &str) -> Option<String> {
         if let Some(response) = self
             .worker
@@ -575,8 +581,8 @@ impl AppState {
         self.worker
             .cache_response_snapshot(chat_id, response.clone());
         Some(response)
-    }}
-impl AppState {
+    }
+
     fn update_session_in_memory<F>(&mut self, session_id: &str, f: F) -> Option<ChatSession>
     where
         F: FnOnce(&mut ChatSession),
@@ -595,8 +601,8 @@ impl AppState {
         self.session
             .commit_session_update(session, is_current, &mut self.layout);
         Some(session_to_save)
-    }}
-impl AppState {
+    }
+
     #[allow(dead_code)]
     fn with_session_mut<F>(&mut self, session_id: &str, f: F)
     where
@@ -606,8 +612,8 @@ impl AppState {
             return;
         };
         self.spawn_save_session_async(session_to_save, false, None, false);
-    }}
-impl AppState {
+    }
+
     fn save_session_now(&self, session: ChatSession) -> Result<()> {
         if self.session.data_manager.is_none() {
             debug!(
@@ -624,8 +630,8 @@ impl AppState {
             "persisting session synchronously"
         );
         DataManager::new(self.session.provider)?.save_session(&session)
-    }}
-impl AppState {
+    }
+
     fn with_session_mut_and_save_now<F>(
         &mut self,
         session_id: &str,
@@ -639,8 +645,8 @@ impl AppState {
         };
         self.save_session_now(session_to_save.clone())?;
         Ok(Some(session_to_save))
-    }}
-impl AppState {
+    }
+
     fn with_latest_session_mut_and_save_now<F>(
         &mut self,
         session_id: &str,
@@ -687,18 +693,92 @@ impl AppState {
         self.session
             .commit_session_update(persisted_session.clone(), is_current, &mut self.layout);
         Ok(Some(persisted_session))
-    }}
+    }
+
+    fn handle_local_terminal_worker<F>(
+        &mut self,
+        chat_id: &str,
+        response: &str,
+        socket_message: WireMessage,
+        status: &'static str,
+        memory_final_state: &'static str,
+        save_height_cache: bool,
+        mutate_session: F,
+    ) where
+        F: FnOnce(&mut ChatSession, &str) -> bool,
+    {
+        debug!(
+            chat_id=%chat_id,
+            response_len=response.len(),
+            status,
+            save_height_cache,
+            current_session_id=?self.session.current_session.as_ref().map(|session| session.id.as_str()),
+            current_message_count=?self.session.current_session.as_ref().map(|session| session.messages.len()),
+            "handling local terminal worker update"
+        );
+        let reloaded = self.sync_current_session_from_disk_if_safe(chat_id);
+        debug!(
+            chat_id=%chat_id,
+            reloaded,
+            "local terminal worker pre-sync decision completed"
+        );
+        let mut response_changed = false;
+        if let Err(err) = self.with_latest_session_mut_and_save_now(
+            chat_id,
+            "rust_chatbot.local_terminal_worker",
+            |session| {
+                response_changed = mutate_session(session, response);
+            },
+        ) {
+            error!(
+                error=%err,
+                chat_id=%chat_id,
+                "failed to persist terminal session update before worker finalization"
+            );
+            return;
+        }
+
+        let is_current_chat = self.session.is_current_chat(chat_id);
+        debug!(
+            chat_id=%chat_id,
+            response_changed,
+            is_current_chat,
+            current_message_count=?self.session.current_session.as_ref().map(|session| session.messages.len()),
+            current_last_is_user=?self.session.current_session.as_ref().and_then(|session| session.messages.last().map(|message| message.is_user)),
+            "local terminal worker session mutation persisted"
+        );
+        if is_current_chat && response_changed && save_height_cache {
+            self.layout.pending_height_cache_save = Some(chat_id.to_string());
+        }
+
+        // Terminal path: clear any optimistic "Thinking..." draft.
+        self.session.clear_pending_draft_if_matches(chat_id);
+
+        // Prevent our echoed StreamEnd from reloading past the final local save.
+        self.worker.mark_locally_finalized(chat_id);
+
+        self.bump_sessions_version();
+        self.sync_socket.send(&socket_message);
+        self.log_response_end(chat_id, status);
+        self.finalize_worker_slot(chat_id, None, Some(memory_final_state));
+    }
+}
+
 #[path = "session_runtime_cleanup.rs"]
 mod session_runtime_cleanup;
+
 #[cfg(test)]
 #[path = "session_runtime_tests.rs"]
 mod session_runtime_tests;
+
 #[cfg(test)]
 #[path = "session_runtime_terminal_persistence_tests.rs"]
 mod session_runtime_terminal_persistence_tests;
+
 #[cfg(test)]
 #[path = "session_runtime_prompt_tests.rs"]
 mod session_runtime_prompt_tests;
+
 #[cfg(test)]
 #[path = "session_promotion_tests.rs"]
 mod session_promotion_tests;
