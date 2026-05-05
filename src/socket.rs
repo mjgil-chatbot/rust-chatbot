@@ -15,8 +15,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
 use rust_debug::tracing::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
+
+// ── protocol messages ───────────────────────────────────────────────
+
 /// Message sent over the wire.
 /// Field names in code are readable; `serde(rename)` keeps the JSON compact.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -40,6 +44,7 @@ pub struct WireMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sid: Option<String>,
 }
+
 /// Events delivered to the UI thread from the socket reader.
 #[derive(Debug)]
 pub enum SyncEvent {
@@ -73,11 +78,15 @@ pub enum SyncEvent {
     Disconnected,
     Reconnected,
 }
+
+// ── public handle ───────────────────────────────────────────────────
+
 /// Handle held by the UI thread to send messages and receive events.
 #[derive(Clone)]
 pub struct SocketHandle {
     writer: Arc<Mutex<Option<UnixStream>>>,
 }
+
 impl SocketHandle {
     /// Create a disconnected handle that silently drops all messages.
     /// Used in tests where no broker is running.
@@ -86,15 +95,15 @@ impl SocketHandle {
         Self {
             writer: Arc::new(Mutex::new(None)),
         }
-    }}
-impl SocketHandle {
+    }
+
     #[cfg(test)]
     pub fn from_stream(stream: UnixStream) -> Self {
         Self {
             writer: Arc::new(Mutex::new(Some(stream))),
         }
-    }}
-impl SocketHandle {
+    }
+
     /// Send a message to all other instances via the broker.
     /// Silently drops the message if not connected.
     pub fn send(&self, msg: &WireMessage) {
@@ -118,7 +127,11 @@ impl SocketHandle {
             warn!("socket: write failed, clearing connection");
             *guard = None;
         }
-    }}
+    }
+}
+
+// ── public entry point ──────────────────────────────────────────────
+
 /// Start the socket client.  Always succeeds — returns immediately.
 /// Connection to the broker happens asynchronously in a background thread.
 /// If the broker isn't running, the reader thread retries with backoff.
@@ -136,10 +149,12 @@ pub fn start(ctx: egui::Context) -> (SocketHandle, mpsc::Receiver<SyncEvent>) {
     let handle = SocketHandle { writer };
     (handle, rx)
 }
+
 /// Returns the canonical broker socket path.
 pub fn sock_path() -> PathBuf {
     crate::sync::broker_socket_path()
 }
+
 fn ensure_broker_best_effort(sock_path: &Path) {
     if UnixStream::connect(sock_path).is_ok() {
         return;
@@ -175,10 +190,12 @@ fn ensure_broker_best_effort(sock_path: &Path) {
         }
     }
 }
+
 fn current_executable_path() -> std::io::Result<PathBuf> {
     let path = std::env::current_exe()?;
     Ok(path.canonicalize().ok().unwrap_or(path))
 }
+
 fn other_profile_dir(current_dir: &Path) -> Option<(&'static str, PathBuf)> {
     let current_profile = current_dir.file_name()?.to_str()?;
     let other_profile = match current_profile {
@@ -192,6 +209,7 @@ fn other_profile_dir(current_dir: &Path) -> Option<(&'static str, PathBuf)> {
     }
     Some((other_profile, target_dir.join(other_profile)))
 }
+
 fn resolve_companion_binary(binary_name: &str) -> std::io::Result<PathBuf> {
     let current_exe = current_executable_path()?;
     let current_dir = current_exe.parent().unwrap_or(Path::new("."));
@@ -221,10 +239,14 @@ fn resolve_companion_binary(binary_name: &str) -> std::io::Result<PathBuf> {
         ),
     ))
 }
+
+// ── reader thread with reconnect ────────────────────────────────────
+
 /// Backoff parameters for reconnect attempts.
 const BACKOFF_INITIAL_MS: u64 = 100;
 const BACKOFF_MAX_MS: u64 = 5_000;
 const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+
 fn reader_thread(
     sock_path: PathBuf,
     tx: mpsc::Sender<SyncEvent>,
@@ -289,6 +311,7 @@ fn reader_thread(
         warn!("socket: disconnected from broker, will reconnect");
     }
 }
+
 /// Read messages until an error occurs.
 /// Returns `false` if the mpsc sender is broken (UI dropped).
 fn read_loop(stream: &UnixStream, tx: &mpsc::Sender<SyncEvent>, ctx: &egui::Context) -> bool {
@@ -358,6 +381,9 @@ fn read_loop(stream: &UnixStream, tx: &mpsc::Sender<SyncEvent>, ctx: &egui::Cont
         ctx.request_repaint();
     }
 }
+
+// ── convenience constructors for WireMessage ────────────────────────
+
 impl WireMessage {
     pub fn begin(chat_id: &str, provider: &str) -> Self {
         Self {
@@ -368,8 +394,7 @@ impl WireMessage {
             is_error: false,
             sid: None,
         }
-    }}
-impl WireMessage {
+    }
     pub fn data(chat_id: &str, provider: &str, response: &str) -> Self {
         Self {
             msg_type: "data".into(),
@@ -379,8 +404,7 @@ impl WireMessage {
             is_error: false,
             sid: None,
         }
-    }}
-impl WireMessage {
+    }
     pub fn end(chat_id: &str, provider: &str, response: &str, session_id: Option<&str>) -> Self {
         Self {
             msg_type: "end".into(),
@@ -390,8 +414,7 @@ impl WireMessage {
             is_error: false,
             sid: session_id.map(|s| s.into()),
         }
-    }}
-impl WireMessage {
+    }
     pub fn stopped(chat_id: &str, provider: &str, response: &str) -> Self {
         Self {
             msg_type: "stopped".into(),
@@ -401,8 +424,7 @@ impl WireMessage {
             is_error: false,
             sid: None,
         }
-    }}
-impl WireMessage {
+    }
     pub fn feedback(chat_id: &str, provider: &str, response: &str, is_error: bool) -> Self {
         Self {
             msg_type: "feedback".into(),
@@ -412,8 +434,7 @@ impl WireMessage {
             is_error,
             sid: None,
         }
-    }}
-impl WireMessage {
+    }
     pub fn sessions_changed() -> Self {
         Self {
             msg_type: "sessions".into(),
@@ -423,4 +444,9 @@ impl WireMessage {
             is_error: false,
             sid: None,
         }
-    }}
+    }
+}
+
+#[cfg(test)]
+#[path = "socket_tests.rs"]
+mod tests;
