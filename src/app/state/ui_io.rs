@@ -1,32 +1,41 @@
 use std::collections::{HashMap, HashSet};
+
 use anyhow::{Context, Result};
+
 use super::*;
+
 #[path = "ui_io_background.rs"]
 mod background;
+
 use background::{
     load_selected_session, load_selected_session_after_delete, load_session_list_patch,
     save_session_in_background,
 };
+
 #[derive(Clone)]
 pub(crate) struct SessionListPatch {
     pub(crate) sessions: Vec<SessionInfo>,
 }
+
 #[derive(Clone)]
 pub(crate) struct SelectedSessionLoad {
     pub(crate) sessions: Option<Vec<SessionInfo>>,
     pub(crate) current_session: Option<ChatSession>,
     pub(crate) requested_session_id: Option<String>,
 }
+
 #[derive(Clone)]
 pub(crate) struct PendingUiSend {
     pub(crate) chat_id: String,
     pub(crate) message_timestamp_ms: i64,
 }
+
 #[derive(Clone)]
 pub(crate) struct PendingCreateSession {
     pub(crate) request_id: u64,
     pub(crate) name: String,
 }
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum UiIoSaveOperation {
     CreateSession,
@@ -36,6 +45,7 @@ pub(crate) enum UiIoSaveOperation {
     RefreshSessionList,
     SystemPromptSave,
 }
+
 pub(crate) fn save_operation_label(operation: UiIoSaveOperation) -> &'static str {
     match operation {
         UiIoSaveOperation::CreateSession => "create_session",
@@ -46,6 +56,7 @@ pub(crate) fn save_operation_label(operation: UiIoSaveOperation) -> &'static str
         UiIoSaveOperation::SystemPromptSave => "save_system_prompt",
     }
 }
+
 pub(crate) enum UiIoResult {
     SessionListPatch {
         request_id: Option<u64>,
@@ -89,6 +100,7 @@ pub(crate) enum UiIoResult {
         error: String,
     },
 }
+
 pub(crate) struct UiIoState {
     pub(crate) tx: mpsc::Sender<UiIoResult>,
     pub(crate) rx: mpsc::Receiver<UiIoResult>,
@@ -104,6 +116,7 @@ pub(crate) struct UiIoState {
     pub(crate) pending_create_session: Option<PendingCreateSession>,
     pub(crate) pending_send_chat_ids: HashSet<String>,
 }
+
 impl UiIoState {
     pub(crate) fn new() -> Self {
         let (tx, rx) = mpsc::channel();
@@ -122,52 +135,52 @@ impl UiIoState {
             pending_create_session: None,
             pending_send_chat_ids: HashSet::new(),
         }
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn next_user_request_id(&mut self) -> u64 {
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.saturating_add(1);
         request_id
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn set_repaint_ctx(&mut self, ctx: eframe::egui::Context) {
         self.repaint_ctx = Some(ctx);
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn next_list_request_id(&mut self) -> u64 {
         let request_id = self.next_user_request_id();
         self.latest_list_request_id = request_id;
         request_id
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn next_load_request_id(&mut self) -> u64 {
         let request_id = self.next_user_request_id();
         self.latest_load_request_id = request_id;
         request_id
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn next_save_request_id(&mut self) -> u64 {
         let request_id = self.next_user_request_id();
         self.latest_save_request_id = request_id;
         request_id
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn record_list_request_id_for_session(&mut self, session_id: &str, request_id: u64) {
         self.latest_list_request_id_by_session
             .insert(session_id.to_string(), request_id);
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn record_load_request_id_for_session(&mut self, session_id: &str, request_id: u64) {
         self.latest_load_request_id_by_session
             .insert(session_id.to_string(), request_id);
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn record_save_request_id_for_session(&mut self, session_id: &str, request_id: u64) {
         self.latest_save_request_id = request_id;
         self.latest_save_request_id_by_session
             .insert(session_id.to_string(), request_id);
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn latest_list_request_id_for_session(&self, session_id: Option<&str>) -> u64 {
         session_id
             .and_then(|session_id| {
@@ -176,8 +189,8 @@ impl UiIoState {
                     .copied()
             })
             .unwrap_or(self.latest_list_request_id)
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn latest_load_request_id_for_session(&self, session_id: Option<&str>) -> u64 {
         session_id
             .and_then(|session_id| {
@@ -186,8 +199,8 @@ impl UiIoState {
                     .copied()
             })
             .unwrap_or(self.latest_load_request_id)
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn latest_save_request_id_for_session(&self, session_id: Option<&str>) -> u64 {
         session_id
             .and_then(|session_id| {
@@ -196,23 +209,23 @@ impl UiIoState {
                     .copied()
             })
             .unwrap_or(self.latest_save_request_id)
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn mark_create_session_started(&mut self, request_id: u64, name: String) {
         self.pending_create_session = Some(PendingCreateSession { request_id, name });
-    }}
-impl UiIoState {
+    }
+
     #[allow(dead_code)]
     pub(crate) fn is_create_session_in_flight(&self) -> bool {
         self.pending_create_session.is_some()
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn pending_create_session_name(&self) -> Option<&str> {
         self.pending_create_session
             .as_ref()
             .map(|pending| pending.name.as_str())
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn clear_pending_create_session(&mut self, request_id: Option<u64>) {
         if self
             .pending_create_session
@@ -222,11 +235,13 @@ impl UiIoState {
         {
             self.pending_create_session = None;
         }
-    }}
-impl UiIoState {
+    }
+
     pub(crate) fn cancel_pending_create_session(&mut self) {
         self.pending_create_session = None;
-    }}
+    }
+}
+
 pub(crate) fn update_message_command(
     session: &mut ChatSession,
     message_timestamp_ms: i64,
@@ -234,6 +249,7 @@ pub(crate) fn update_message_command(
 ) -> Result<()> {
     update_message_request_metadata(session, message_timestamp_ms, command_str, None)
 }
+
 pub(crate) fn update_message_request_metadata(
     session: &mut ChatSession,
     message_timestamp_ms: i64,
@@ -246,6 +262,7 @@ pub(crate) fn update_message_request_metadata(
         retrieved_memory.map(str::to_string),
     )
 }
+
 impl AppState {
     pub(crate) fn drain_ui_io_results(&mut self) {
         let mut results = Vec::new();
@@ -260,8 +277,8 @@ impl AppState {
         for result in results {
             self.enqueue_event(AppEvent::UiIo(result));
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn apply_sidebar_patch(&mut self, patch: SessionListPatch) {
         let current_session_id = self
             .session
@@ -299,8 +316,8 @@ impl AppState {
             self.session.loading_session_id = None;
             self.clear_current_session();
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn apply_selected_session_reload(&mut self, load: SelectedSessionLoad) {
         let SelectedSessionLoad {
             sessions,
@@ -357,17 +374,27 @@ impl AppState {
                 );
             }
         }
-    }}
+    }
+}
+
 include!("ui_io_async_impl.rs");
+
 #[cfg(test)]
 #[path = "ui_io_tests.rs"]
 mod tests;
+
 #[cfg(test)]
 #[path = "ui_io_create_tests.rs"]
 mod create_tests;
+
 #[cfg(test)]
 #[path = "ui_io_async_tests.rs"]
 mod async_tests;
+
+#[cfg(test)]
+#[path = "ui_io_repaint_tests.rs"]
+mod repaint_tests;
+
 #[cfg(test)]
 #[path = "ui_io_reload_guard_tests.rs"]
 mod reload_guard_tests;
