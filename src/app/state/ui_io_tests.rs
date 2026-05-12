@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::state::ui_io::background::resolve_snapshot_current_session_id;
+
 fn make_session(id: &str) -> ChatSession {
     ChatSession {
         id: id.to_string(),
@@ -28,6 +29,7 @@ fn make_session(id: &str) -> ChatSession {
         runsc_image: None,
     }
 }
+
 fn make_session_info(id: &str) -> SessionInfo {
     let session = make_session(id);
     SessionInfo {
@@ -39,6 +41,7 @@ fn make_session_info(id: &str) -> SessionInfo {
         hidden: false,
     }
 }
+
 fn test_app_state(provider: ModelProvider) -> AppState {
     let (_tx, rx) = mpsc::channel();
     AppState {
@@ -52,6 +55,10 @@ fn test_app_state(provider: ModelProvider) -> AppState {
         dialog_parent: None,
     }
 }
+
+#[path = "ui_io_tests_tail.rs"]
+mod tail;
+
 #[test]
 fn reset_worker_dir_for_send_clears_stale_terminal_spool_files() {
     let _lock = crate::TEST_ENV_LOCK
@@ -91,18 +98,21 @@ fn reset_worker_dir_for_send_clears_stale_terminal_spool_files() {
     }
     let _ = std::fs::remove_dir_all(home_dir);
 }
+
 #[test]
 fn passive_refresh_does_not_pick_first_session_as_current() {
     let sessions = vec![make_session_info("top"), make_session_info("next")];
     let selected = resolve_snapshot_current_session_id(&sessions, None, false);
     assert!(selected.is_none());
 }
+
 #[test]
 fn fallback_refresh_can_pick_first_session_when_needed() {
     let sessions = vec![make_session_info("top"), make_session_info("next")];
     let selected = resolve_snapshot_current_session_id(&sessions, None, true);
     assert_eq!(selected, Some("top"));
 }
+
 #[test]
 fn sidebar_patch_without_current_session_keeps_existing_active_chat() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -113,6 +123,7 @@ fn sidebar_patch_without_current_session_keeps_existing_active_chat() {
     });
     assert_eq!(state.session.current_session_id(), Some("current"));
 }
+
 #[test]
 fn selected_session_reload_without_session_clears_selection() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -126,6 +137,7 @@ fn selected_session_reload_without_session_clears_selection() {
     assert!(state.session.current_session.is_none());
     assert!(state.session.selected_session_id.is_none());
 }
+
 #[test]
 fn selected_session_reload_skips_replacement_when_pending_draft_active() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -167,6 +179,7 @@ fn selected_session_reload_skips_replacement_when_pending_draft_active() {
         "stale passive reload must not inject messages into active send"
     );
 }
+
 #[test]
 fn selected_session_reload_proceeds_when_no_pending_draft() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -194,6 +207,7 @@ fn selected_session_reload_proceeds_when_no_pending_draft() {
         "without pending_draft, newer disk version must be applied"
     );
 }
+
 #[test]
 fn selected_session_reload_proceeds_when_pending_draft_is_for_other_chat() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -220,6 +234,7 @@ fn selected_session_reload_proceeds_when_pending_draft_is_for_other_chat() {
         Some("session-1")
     );
 }
+
 #[test]
 fn load_failure_clears_loading_indicator_and_restores_selected_session() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -252,6 +267,7 @@ fn load_failure_clears_loading_indicator_and_restores_selected_session() {
         "Failed to load session failed: boom".to_string()
     );
 }
+
 #[test]
 fn begin_session_load_activates_cached_session_immediately() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -278,6 +294,7 @@ fn begin_session_load_activates_cached_session_immediately() {
         Some("session-2")
     );
 }
+
 #[test]
 fn stale_load_failure_for_targeted_session_still_clears_sidebar_state() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -312,6 +329,7 @@ fn stale_load_failure_for_targeted_session_still_clears_sidebar_state() {
         "Failed to load session failed: boom".to_string()
     );
 }
+
 #[test]
 fn stale_session_load_for_non_targeted_row_is_dropped() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -348,6 +366,7 @@ fn stale_session_load_for_non_targeted_row_is_dropped() {
         Some("current")
     );
 }
+
 #[test]
 fn delete_non_current_session_reload_keeps_current_session() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -377,6 +396,7 @@ fn delete_non_current_session_reload_keeps_current_session() {
     assert_eq!(state.session.sessions.len(), 1);
     assert_eq!(state.session.sessions[0].id, "current");
 }
+
 #[test]
 fn selected_session_reload_without_sidebar_patch_preserves_existing_sidebar_state() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -392,6 +412,7 @@ fn selected_session_reload_without_sidebar_patch_preserves_existing_sidebar_stat
     assert_eq!(state.session.sessions[0].id, "current");
     assert_eq!(state.session.sessions[1].id, "other");
 }
+
 #[test]
 fn stale_rename_failure_for_current_session_is_dropped() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -419,6 +440,7 @@ fn stale_rename_failure_for_current_session_is_dropped() {
         "stale rename failure should be dropped for the active row"
     );
 }
+
 #[test]
 fn delete_failure_for_non_current_session_uses_scoped_load_request_ids() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -451,6 +473,7 @@ fn delete_failure_for_non_current_session_uses_scoped_load_request_ids() {
     assert!(feedback.is_error);
     assert_eq!(feedback.message, "Failed to delete session other: boom");
 }
+
 #[test]
 fn stale_save_result_for_another_session_remains_visible_when_scoped_ids_differ() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -483,6 +506,7 @@ fn stale_save_result_for_another_session_remains_visible_when_scoped_ids_differ(
     assert!(feedback.is_error);
     assert_eq!(feedback.message, "Failed to save session other: boom");
 }
+
 #[test]
 fn save_result_for_older_session_is_not_dropped_by_newer_request_in_same_session() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -514,6 +538,7 @@ fn save_result_for_older_session_is_not_dropped_by_newer_request_in_same_session
     assert!(!feedback.is_error);
     assert_eq!(feedback.message, "Session saved");
 }
+
 #[test]
 fn system_prompt_save_failed_keeps_prompt_dirty_for_current_session() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -549,6 +574,7 @@ fn system_prompt_save_failed_keeps_prompt_dirty_for_current_session() {
         "Failed to save session session-1: boom".to_string()
     );
 }
+
 #[test]
 fn stale_system_prompt_save_failure_for_current_session_is_dropped() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -585,6 +611,7 @@ fn stale_system_prompt_save_failure_for_current_session_is_dropped() {
         "stale system prompt save failure should be dropped"
     );
 }
+
 #[test]
 fn system_prompt_save_success_clears_prompt_dirty_for_target_session() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -612,6 +639,7 @@ fn system_prompt_save_success_clears_prompt_dirty_for_target_session() {
     assert!(!feedback.is_error);
     assert_eq!(feedback.message, "System prompt saved");
 }
+
 #[test]
 fn stale_system_prompt_save_success_for_current_session_is_dropped() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -646,6 +674,7 @@ fn stale_system_prompt_save_success_for_current_session_is_dropped() {
         "stale system prompt save success should be dropped"
     );
 }
+
 #[test]
 fn implicit_session_save_success_does_not_set_status_feedback() {
     let mut state = test_app_state(ModelProvider::Claude);
@@ -663,6 +692,7 @@ fn implicit_session_save_success_does_not_set_status_feedback() {
         "implicit autosave success should stay silent"
     );
 }
+
 #[test]
 fn system_prompt_save_missing_session_does_not_set_dirty_marker() {
     let mut state = test_app_state(ModelProvider::Claude);

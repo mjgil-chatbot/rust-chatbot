@@ -7,15 +7,21 @@ use eframe::egui;
 use rust_debug::tracing::{error, info};
 use std::sync::{mpsc::TryRecvError, OnceLock};
 use std::time::Instant;
+
 use crate::app::state::{AppEvent, AppState, AppUiAction, HeightCacheScan, LayoutLogFeedback};
 use crate::app::ui::{layout_log, message_list};
 use crate::config;
 use crate::data::height_cache_width_key;
+
 #[cfg(test)]
 mod flow_tests;
 mod header;
 mod input;
 mod summary;
+#[cfg(test)]
+#[path = "main_panel/tests.rs"]
+mod tests;
+
 #[derive(Clone)]
 pub(crate) struct LayoutSnapshot {
     pub(crate) viewport_rect: egui::Rect,
@@ -34,11 +40,13 @@ pub(crate) struct LayoutSnapshot {
     pub(crate) input_area: Option<InputAreaSnapshot>,
     pub(crate) status_rect: Option<egui::Rect>,
 }
+
 struct HeaderHeightCacheInfo {
     width_key: u32,
     scan_active: bool,
     can_compute: bool,
 }
+
 impl LayoutSnapshot {
     fn new(ctx: &egui::Context, content_width: f32) -> Self {
         Self {
@@ -58,7 +66,9 @@ impl LayoutSnapshot {
             input_area: None,
             status_rect: None,
         }
-    }}
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct MessageAreaSnapshot {
     pub(crate) available_width: f32,
@@ -76,6 +86,7 @@ pub(crate) struct MessageAreaSnapshot {
     pub(crate) max_rendered_right: f32,
     pub(crate) max_rendered_overflow: f32,
 }
+
 #[derive(Clone)]
 pub(crate) struct MessageRowSnapshot {
     pub(crate) index: usize,
@@ -93,6 +104,7 @@ pub(crate) struct MessageRowSnapshot {
     pub(crate) top: f32,
     pub(crate) bottom: f32,
 }
+
 #[derive(Clone)]
 pub(crate) struct InputAreaSnapshot {
     pub(crate) rect: egui::Rect,
@@ -108,9 +120,11 @@ pub(crate) struct InputAreaSnapshot {
     pub(crate) button_rect: egui::Rect,
     pub(crate) input_focus_active: bool,
 }
+
 fn optimistic_create_session_name(state: &AppState) -> Option<&str> {
     state.session.ui_io.pending_create_session_name()
 }
+
 fn connected_mcp_servers(state: &AppState) -> Vec<String> {
     let overrides = session_effective_mcp_overrides(state);
     let mut names = crate::provider_bridge::effective_mcp_server_names(
@@ -128,6 +142,7 @@ fn connected_mcp_servers(state: &AppState) -> Vec<String> {
     names.dedup();
     names
 }
+
 fn session_effective_mcp_overrides(
     state: &AppState,
 ) -> Option<crate::provider_bridge::ProviderRequestOverrides> {
@@ -151,9 +166,11 @@ fn session_effective_mcp_overrides(
 
     Some(overrides)
 }
+
 fn mcp_status_text(names: &[String]) -> String {
     format!("MCP: {}", names.len())
 }
+
 fn mcp_hover_text(names: &[String]) -> String {
     if names.is_empty() {
         return "No MCP servers configured".to_string();
@@ -171,9 +188,11 @@ fn mcp_hover_text(names: &[String]) -> String {
     }
     lines.join("\n")
 }
+
 fn omniforge_selected_model_label(session: Option<&crate::data::ChatSession>) -> &'static str {
     crate::omniforge::selected_model(session).label
 }
+
 fn render_model_status(ui: &mut egui::Ui, state: &mut AppState) {
     if state.session.provider != crate::model::ModelProvider::OmniForge {
         let model_label =
@@ -212,6 +231,7 @@ fn render_model_status(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
 }
+
 /// Render the main chat panel
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     drain_layout_log_completion(state);
@@ -392,6 +412,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     ui.painter()
         .vline(right_border_x, child_rect.y_range(), border_stroke);
 }
+
 fn drain_layout_log_completion(state: &mut AppState) {
     let Some(rx) = state.layout.layout_log_rx.take() else {
         return;
@@ -428,11 +449,13 @@ fn drain_layout_log_completion(state: &mut AppState) {
         }
     }
 }
+
 fn clamp_content_width(ui: &mut egui::Ui, width: f32) {
     ui.set_width(width);
     ui.set_min_width(width);
     ui.set_max_width(width);
 }
+
 fn render_panel_separator(ui: &mut egui::Ui, width: f32) {
     let separator_height = ui.spacing().item_spacing.y.max(6.0);
     let (rect, _) =
@@ -443,6 +466,7 @@ fn render_panel_separator(ui: &mut egui::Ui, width: f32) {
         ui.visuals().widgets.noninteractive.bg_stroke,
     );
 }
+
 fn auto_ui_debug_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
@@ -454,6 +478,7 @@ fn auto_ui_debug_enabled() -> bool {
             .unwrap_or(false)
     })
 }
+
 fn emit_auto_ui_debug_trace(state: &mut AppState, layout_snapshot: &LayoutSnapshot) {
     if !auto_ui_debug_enabled() {
         return;
@@ -549,6 +574,7 @@ fn emit_auto_ui_debug_trace(state: &mut AppState, layout_snapshot: &LayoutSnapsh
         "ui_auto_debug"
     );
 }
+
 /// Render the system prompt input area
 fn render_system_prompt_area(ui: &mut egui::Ui, state: &mut AppState) -> egui::Rect {
     let response = ui.group(|ui| {
@@ -585,6 +611,7 @@ fn render_system_prompt_area(ui: &mut egui::Ui, state: &mut AppState) -> egui::R
     });
     response.response.rect
 }
+
 /// Render the status bar
 fn render_status_bar(
     ui: &mut egui::Ui,
