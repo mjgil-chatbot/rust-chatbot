@@ -2,19 +2,24 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
 use crate::{config, model::ModelProvider};
+
 const WORKSPACE_HISTORY_FILE: &str = "workspace-history.json";
 const MAX_RECENT_WORKSPACES: usize = 5;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ProviderWorkspaceSnapshot {
     pub(crate) current_dir: Option<String>,
     pub(crate) recent_dirs: Vec<String>,
 }
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct WorkspaceHistoryFile {
     #[serde(default)]
     providers: BTreeMap<String, ProviderWorkspacePrefs>,
 }
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct ProviderWorkspacePrefs {
     #[serde(default)]
@@ -22,6 +27,7 @@ struct ProviderWorkspacePrefs {
     #[serde(default)]
     recent_dirs: Vec<String>,
 }
+
 pub(crate) fn load_provider_workspace_snapshot(
     provider: ModelProvider,
 ) -> ProviderWorkspaceSnapshot {
@@ -44,6 +50,7 @@ pub(crate) fn load_provider_workspace_snapshot(
         recent_dirs: prefs.recent_dirs,
     }
 }
+
 pub(crate) fn save_provider_workspace_snapshot(
     provider: ModelProvider,
     current_dir: Option<&str>,
@@ -63,11 +70,13 @@ pub(crate) fn save_provider_workspace_snapshot(
     );
     write_workspace_history(&history)
 }
+
 pub(crate) fn push_recent_dir(recent_dirs: &mut Vec<String>, path: &str) {
     recent_dirs.retain(|candidate| candidate != path);
     recent_dirs.insert(0, path.to_string());
     recent_dirs.truncate(MAX_RECENT_WORKSPACES);
 }
+
 pub(crate) fn default_workspace_dir() -> Option<String> {
     if let Some(home) = dirs::home_dir() {
         let git_dir = home.join("git");
@@ -80,6 +89,7 @@ pub(crate) fn default_workspace_dir() -> Option<String> {
         .ok()
         .map(|path| path.to_string_lossy().into_owned())
 }
+
 pub(crate) fn collapse_home_prefix(path: &str) -> String {
     let Some(home) = dirs::home_dir() else {
         return path.to_string();
@@ -93,6 +103,7 @@ pub(crate) fn collapse_home_prefix(path: &str) -> String {
         path.to_string()
     }
 }
+
 pub(crate) fn normalize_workspace_input(input: &str) -> Result<String> {
     let trimmed = input.trim();
     anyhow::ensure!(!trimmed.is_empty(), "workspace path is empty");
@@ -114,6 +125,7 @@ pub(crate) fn normalize_workspace_input(input: &str) -> Result<String> {
     );
     Ok(canonical.to_string_lossy().into_owned())
 }
+
 pub(crate) fn workspace_completion_matches(input: &str, limit: usize) -> Vec<String> {
     let Some(context) = completion_context(input) else {
         return Vec::new();
@@ -141,6 +153,7 @@ pub(crate) fn workspace_completion_matches(input: &str, limit: usize) -> Vec<Str
     matches.truncate(limit);
     matches
 }
+
 pub(crate) fn autocomplete_workspace_input(input: &str) -> Option<String> {
     if input.trim() == "~" {
         return Some("~/".to_string());
@@ -149,6 +162,7 @@ pub(crate) fn autocomplete_workspace_input(input: &str) -> Option<String> {
     let matches = workspace_completion_matches(input, usize::MAX);
     autocomplete_workspace_input_from_matches(input, &matches)
 }
+
 pub(crate) fn autocomplete_workspace_input_from_matches(
     input: &str,
     matches: &[String],
@@ -171,9 +185,11 @@ pub(crate) fn autocomplete_workspace_input_from_matches(
         None
     }
 }
+
 fn workspace_history_path() -> PathBuf {
     config::canonical_shared_root_dir().join(WORKSPACE_HISTORY_FILE)
 }
+
 fn read_workspace_history() -> Result<WorkspaceHistoryFile> {
     let path = workspace_history_path();
     match std::fs::read_to_string(&path) {
@@ -185,6 +201,7 @@ fn read_workspace_history() -> Result<WorkspaceHistoryFile> {
         Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
     }
 }
+
 fn write_workspace_history(history: &WorkspaceHistoryFile) -> Result<()> {
     let path = workspace_history_path();
     if let Some(parent) = path.parent() {
@@ -194,6 +211,7 @@ fn write_workspace_history(history: &WorkspaceHistoryFile) -> Result<()> {
     let contents = serde_json::to_string_pretty(history)?;
     std::fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
+
 fn expand_home(input: &str) -> PathBuf {
     if input == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
@@ -205,6 +223,7 @@ fn expand_home(input: &str) -> PathBuf {
     }
     PathBuf::from(input)
 }
+
 fn longest_common_prefix(values: &[String]) -> String {
     let Some(first) = values.first() else {
         return String::new();
@@ -220,11 +239,13 @@ fn longest_common_prefix(values: &[String]) -> String {
     }
     prefix
 }
+
 struct CompletionContext {
     search_dir: PathBuf,
     typed_prefix: String,
     display_prefix: String,
 }
+
 fn completion_context(input: &str) -> Option<CompletionContext> {
     let current_dir = std::env::current_dir().ok()?;
     if input.is_empty() {
@@ -274,4 +295,101 @@ fn completion_context(input: &str) -> Option<CompletionContext> {
         typed_prefix,
         display_prefix,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::MutexGuard;
+    use tempfile::TempDir;
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    struct CwdGuard {
+        original: PathBuf,
+    }
+
+    impl CwdGuard {
+        fn set(path: &Path) -> Self {
+            let original = std::env::current_dir().expect("current dir");
+            std::env::set_current_dir(path).expect("set current dir");
+            Self { original }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.original).expect("restore current dir");
+        }
+    }
+
+    #[test]
+    fn push_recent_dir_dedupes_and_limits_entries() {
+        let mut recent_dirs = vec![
+            "/a".to_string(),
+            "/b".to_string(),
+            "/c".to_string(),
+            "/d".to_string(),
+            "/e".to_string(),
+        ];
+
+        push_recent_dir(&mut recent_dirs, "/c");
+        push_recent_dir(&mut recent_dirs, "/f");
+
+        assert_eq!(recent_dirs, vec!["/f", "/c", "/a", "/b", "/d"]);
+    }
+
+    #[test]
+    fn normalize_workspace_input_resolves_relative_directories() {
+        let _lock = env_lock();
+        let temp = TempDir::new().expect("temp dir");
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("create workspace");
+        let _cwd = CwdGuard::set(temp.path());
+
+        let normalized = normalize_workspace_input("workspace").expect("normalize workspace");
+        let expected = workspace.canonicalize().expect("canonical workspace");
+        assert_eq!(normalized, expected.to_string_lossy().into_owned());
+    }
+
+    #[test]
+    fn default_workspace_dir_prefers_home_git() {
+        let _lock = env_lock();
+        let temp = TempDir::new().expect("temp dir");
+        let git_dir = temp.path().join("git");
+        std::fs::create_dir_all(&git_dir).expect("create git dir");
+        let old_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", temp.path());
+
+        let default_dir = default_workspace_dir().expect("default workspace dir");
+        assert_eq!(default_dir, git_dir.to_string_lossy().into_owned());
+
+        match old_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    #[test]
+    fn workspace_completion_matches_only_directories() {
+        let _lock = env_lock();
+        let temp = TempDir::new().expect("temp dir");
+        std::fs::create_dir_all(temp.path().join("alpha")).expect("create alpha");
+        std::fs::create_dir_all(temp.path().join("alpine")).expect("create alpine");
+        std::fs::write(temp.path().join("alpha.txt"), "file").expect("create file");
+        let _cwd = CwdGuard::set(temp.path());
+
+        assert_eq!(
+            workspace_completion_matches("al", 8),
+            vec!["alpha/".to_string(), "alpine/".to_string()]
+        );
+        assert_eq!(
+            autocomplete_workspace_input("alpha"),
+            Some("alpha/".to_string())
+        );
+    }
 }

@@ -8,12 +8,14 @@ use egui_extras::syntax_highlighting::{self, CodeTheme};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Instant;
+
 use crate::app::ui::transcript_summary::{
     hard_break_standard_transcript_lines, split_standard_transcript_and_markdown,
 };
 use crate::data::ChatMessage;
 use crate::forge_loop;
 use crate::markdown::{self, MarkdownCache};
+
 /// Render a single chat message.
 ///
 /// The message group fills the available width.  Markdown content inside
@@ -149,6 +151,7 @@ pub fn render_message(
     });
     response.response.rect
 }
+
 fn assistant_retrieved_memory_preview<'a>(
     message: &ChatMessage,
     previous_message: Option<&'a ChatMessage>,
@@ -160,10 +163,12 @@ fn assistant_retrieved_memory_preview<'a>(
         .and_then(|previous| previous.retrieved_memory.as_deref())
         .filter(|retrieved_memory| !retrieved_memory.trim().is_empty())
 }
+
 fn should_render_as_plaintext_stream(content: &str) -> bool {
     let sanitized = forge_loop::sanitize_stream_plaintext(content);
     forge_loop::is_forge_plaintext_response(&sanitized)
 }
+
 fn split_transcript_and_markdown(content: &str) -> Option<StreamRenderSplit> {
     let sanitized = forge_loop::sanitize_stream_plaintext(content);
     if sanitized.is_empty() || !forge_loop::is_forge_plaintext_response(&sanitized) {
@@ -191,6 +196,7 @@ fn split_transcript_and_markdown(content: &str) -> Option<StreamRenderSplit> {
         markdown_body: Some(body),
     })
 }
+
 fn sanitized_stream_markdown_content(content: &str) -> Option<String> {
     let sanitized = forge_loop::sanitize_stream_plaintext(content);
     if sanitized.is_empty() || sanitized == content {
@@ -198,6 +204,7 @@ fn sanitized_stream_markdown_content(content: &str) -> Option<String> {
     }
     (!forge_loop::is_forge_plaintext_response(&sanitized)).then_some(sanitized)
 }
+
 fn render_plaintext_stream(ui: &mut egui::Ui, content: &str) {
     for block in prepare_plaintext_render_blocks(content) {
         match block {
@@ -208,6 +215,7 @@ fn render_plaintext_stream(ui: &mut egui::Ui, content: &str) {
         }
     }
 }
+
 fn render_assistant_markdown(
     ui: &mut egui::Ui,
     markdown_cache: &mut MarkdownCache,
@@ -244,6 +252,7 @@ fn render_assistant_markdown(
         );
     }
 }
+
 fn render_collapsed_transcript_summary(
     ui: &mut egui::Ui,
     markdown_cache: &mut MarkdownCache,
@@ -269,6 +278,7 @@ fn render_collapsed_transcript_summary(
         render_assistant_markdown(ui, markdown_cache, message, inner_w, normalized.as_ref());
     });
 }
+
 fn render_retrieved_memory_summary(
     ui: &mut egui::Ui,
     markdown_cache: &mut MarkdownCache,
@@ -284,6 +294,7 @@ fn render_retrieved_memory_summary(
             render_assistant_markdown(ui, markdown_cache, message, inner_w, retrieved_memory);
         });
 }
+
 fn retrieved_memory_item_label(retrieved_memory: &str) -> String {
     let item_count = retrieved_memory
         .lines()
@@ -296,6 +307,7 @@ fn retrieved_memory_item_label(retrieved_memory: &str) -> String {
         format!("{item_count} items")
     }
 }
+
 fn render_plaintext_block(ui: &mut egui::Ui, text: &str) {
     if text.is_empty() {
         return;
@@ -309,6 +321,7 @@ fn render_plaintext_block(ui: &mut egui::Ui, text: &str) {
         ui.add(egui::Label::new(monospace).wrap_mode(egui::TextWrapMode::Wrap));
     }
 }
+
 fn render_highlighted_code_block(ui: &mut egui::Ui, language: Option<&str>, code: &str) {
     let language = normalize_code_language(language);
     let theme = CodeTheme::from_style(ui.style().as_ref());
@@ -328,12 +341,14 @@ fn render_highlighted_code_block(ui: &mut egui::Ui, language: Option<&str>, code
             }
         });
 }
+
 fn normalize_code_language(language: Option<&str>) -> &str {
     match language.map(str::trim).filter(|lang| !lang.is_empty()) {
         Some("text" | "txt") | None => "sh",
         Some(lang) => lang,
     }
 }
+
 fn base_markdown_content(content: &str) -> Cow<'_, str> {
     let trimmed = content.trim_start();
     let without_codex_prefix = if let Some(rest) = trimmed.strip_prefix("Codex: turn complete") {
@@ -363,12 +378,14 @@ fn base_markdown_content(content: &str) -> Cow<'_, str> {
         .map(Cow::Owned)
         .unwrap_or_else(|| Cow::Borrowed(without_codex_prefix))
 }
+
 fn is_transcript_status_line(line: &str) -> bool {
     line.starts_with("● [")
         || line.starts_with("○ [")
         || line.starts_with("◦ [")
         || line.starts_with("• [")
 }
+
 fn looks_like_markdown_body(content: &str) -> bool {
     content.lines().any(|line| {
         let trimmed = line.trim_start();
@@ -383,10 +400,12 @@ fn looks_like_markdown_body(content: &str) -> bool {
             || trimmed.starts_with("3. ")
     })
 }
+
 struct StreamRenderSplit {
     plaintext_preamble: Option<String>,
     markdown_body: Option<String>,
 }
+
 enum PlaintextBlock {
     Text(String),
     Code {
@@ -394,11 +413,13 @@ enum PlaintextBlock {
         code: String,
     },
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PlaintextRenderBlock {
     Text(String),
     Code { language: String, code: String },
 }
+
 impl PlaintextBlock {
     fn parse(content: &str) -> Vec<Self> {
         let mut blocks = Vec::new();
@@ -447,7 +468,9 @@ impl PlaintextBlock {
         }
 
         blocks
-    }}
+    }
+}
+
 fn prepare_plaintext_render_blocks(content: &str) -> Vec<PlaintextRenderBlock> {
     let sanitized = forge_loop::sanitize_stream_plaintext(content);
     let display = if sanitized.is_empty() {
@@ -467,6 +490,7 @@ fn prepare_plaintext_render_blocks(content: &str) -> Vec<PlaintextRenderBlock> {
         })
         .collect()
 }
+
 fn plaintext_lines_for_render(text: &str) -> Vec<&str> {
     let mut lines: Vec<&str> = text.split('\n').collect();
     while lines.last().is_some_and(|line| line.is_empty()) {
@@ -474,6 +498,7 @@ fn plaintext_lines_for_render(text: &str) -> Vec<&str> {
     }
     lines
 }
+
 /// Render the processing indicator
 pub fn render_processing_indicator(ui: &mut egui::Ui) {
     ui.group(|ui| {
@@ -484,6 +509,7 @@ pub fn render_processing_indicator(ui: &mut egui::Ui) {
         });
     });
 }
+
 #[cfg_attr(not(test), allow(dead_code))]
 fn is_standalone_json_message(content: &str) -> bool {
     let trimmed = content.trim();
@@ -493,11 +519,13 @@ fn is_standalone_json_message(content: &str) -> bool {
 
     serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
 }
+
 fn format_standalone_json_message(content: &str) -> Option<String> {
     let trimmed = content.trim();
     let parsed = serde_json::from_str::<serde_json::Value>(trimmed).ok()?;
     serde_json::to_string_pretty(&parsed).ok()
 }
+
 /// Escape double underscores to prevent them being parsed as markdown emphasis.
 ///
 /// Tool names like `mcp__bash__run` contain `__` separators which get interpreted
@@ -505,6 +533,7 @@ fn format_standalone_json_message(content: &str) -> Option<String> {
 fn escape_underscores_in_tool_names(content: &str) -> String {
     content.replace("__", "\\_\\_")
 }
+
 fn normalized_markdown_content(content: &str) -> Cow<'_, str> {
     let base = base_markdown_content(content);
     match hard_break_standard_transcript_lines(base.as_ref()) {
@@ -512,6 +541,7 @@ fn normalized_markdown_content(content: &str) -> Cow<'_, str> {
         Cow::Owned(normalized) => Cow::Owned(normalized),
     }
 }
+
 fn split_leading_transcript_preamble_for_render(response: &str) -> Option<(&str, &str, &str)> {
     let mut preamble_end = 0usize;
     let mut transcript_lines = 0usize;
@@ -549,6 +579,7 @@ fn split_leading_transcript_preamble_for_render(response: &str) -> Option<(&str,
         &response[body_start..],
     ))
 }
+
 fn is_transcript_activity_line_for_render(line: &str) -> bool {
     line.starts_with("● [")
         || line.starts_with("○ [")
@@ -556,6 +587,7 @@ fn is_transcript_activity_line_for_render(line: &str) -> bool {
         || line.starts_with("• [")
         || strip_standard_transcript_timestamp_prefix_for_render(line).len() != line.len()
 }
+
 fn strip_standard_transcript_timestamp_prefix_for_render(line: &str) -> &str {
     let bytes = line.as_bytes();
     if bytes.len() < 16 || bytes[0] != b'[' {
@@ -592,6 +624,7 @@ fn strip_standard_transcript_timestamp_prefix_for_render(line: &str) -> &str {
 
     &line[index + 10..]
 }
+
 fn strip_leading_think_block(content: &str) -> Option<String> {
     let trimmed = content.trim_start();
     let think_open = "<think>";
@@ -605,3 +638,7 @@ fn strip_leading_think_block(content: &str) -> Option<String> {
         trimmed[close_index + think_close.len()..].trim_start_matches(['\r', '\n', ' ']);
     Some(remainder.to_string())
 }
+
+#[cfg(test)]
+#[path = "message_tests.rs"]
+mod tests;

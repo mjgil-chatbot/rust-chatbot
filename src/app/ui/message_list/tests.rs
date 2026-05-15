@@ -1,12 +1,20 @@
 use super::height_seed::should_seed_full_height_cache;
-use super::resolve_scroll_adjustment;
-use super::should_schedule_height_cache_save;
-use super::should_show_pending_draft;
-use crate::data::ChatMessage;
-use crate::data::ChatSession;
-use crate::data::HeightCacheEntry;
+use super::{
+    has_complete_height_cache_entry, render_empty_message_area, render_message_area,
+    resolve_scroll_adjustment, should_schedule_height_cache_save, should_show_pending_draft,
+    SyncHeightCacheSaveGuard,
+};
+use crate::app::state::{AppState, PendingDraft};
+use crate::data::{
+    height_cache_width_key, resolve_height_cache_entry, ChatMessage, ChatSession, DataManager,
+    HeightCacheEntry, SessionHeightCache, SESSION_HEIGHT_CACHE_VERSION,
+};
+use crate::model::ModelProvider;
 use chrono::{TimeZone, Utc};
 use eframe::egui;
+
+mod render_regressions;
+
 #[test]
 fn inter_message_spacing_uses_two_body_lines() {
     let ctx = egui::Context::default();
@@ -25,11 +33,13 @@ fn inter_message_spacing_uses_two_body_lines() {
         });
     });
 }
+
 struct TestHomeGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     _home_dir: tempfile::TempDir,
     previous_home: Option<std::ffi::OsString>,
 }
+
 impl TestHomeGuard {
     fn new() -> Self {
         let lock = crate::TEST_ENV_LOCK
@@ -43,7 +53,9 @@ impl TestHomeGuard {
             _home_dir: home_dir,
             previous_home,
         }
-    }}
+    }
+}
+
 impl Drop for TestHomeGuard {
     fn drop(&mut self) {
         match self.previous_home.as_ref() {
@@ -52,6 +64,7 @@ impl Drop for TestHomeGuard {
         }
     }
 }
+
 fn make_session(id: &str, message_count: usize) -> ChatSession {
     let created_at = Utc.with_ymd_and_hms(2026, 4, 17, 7, 0, 0).unwrap();
     let messages = (0..message_count)
@@ -91,6 +104,7 @@ fn make_session(id: &str, message_count: usize) -> ChatSession {
         runsc_image: None,
     }
 }
+
 #[test]
 fn scroll_adjustment_is_deferred_while_user_is_scrolling() {
     assert_eq!(
@@ -98,6 +112,7 @@ fn scroll_adjustment_is_deferred_while_user_is_scrolling() {
         (None, 15.0)
     );
 }
+
 #[test]
 fn deferred_scroll_adjustment_applies_once_scrolling_stops() {
     assert_eq!(
@@ -105,6 +120,7 @@ fn deferred_scroll_adjustment_applies_once_scrolling_stops() {
         (Some(5.5), 0.0)
     );
 }
+
 #[test]
 fn scroll_adjustment_is_cleared_during_height_scan() {
     assert_eq!(
@@ -112,6 +128,7 @@ fn scroll_adjustment_is_cleared_during_height_scan() {
         (None, 0.0)
     );
 }
+
 #[test]
 fn full_height_seed_runs_without_a_complete_cache() {
     let partial_entry = HeightCacheEntry {
@@ -135,12 +152,14 @@ fn full_height_seed_runs_without_a_complete_cache() {
     ));
     assert!(!should_seed_full_height_cache(Some(&full_entry), 15, false));
 }
+
 #[test]
 fn full_height_seed_skips_large_or_live_sessions() {
     assert!(!should_seed_full_height_cache(None, 0, false));
     assert!(!should_seed_full_height_cache(None, 201, false));
     assert!(!should_seed_full_height_cache(None, 15, true));
 }
+
 #[test]
 fn pending_draft_shown_when_chat_matches_and_not_processing() {
     assert!(should_show_pending_draft(
@@ -149,6 +168,7 @@ fn pending_draft_shown_when_chat_matches_and_not_processing() {
         Some("chat-1")
     ));
 }
+
 #[test]
 fn pending_draft_hidden_when_processing() {
     assert!(!should_show_pending_draft(
@@ -157,6 +177,7 @@ fn pending_draft_hidden_when_processing() {
         Some("chat-1")
     ));
 }
+
 #[test]
 fn pending_draft_hidden_when_chat_id_differs() {
     assert!(!should_show_pending_draft(
@@ -165,14 +186,17 @@ fn pending_draft_hidden_when_chat_id_differs() {
         Some("chat-2")
     ));
 }
+
 #[test]
 fn pending_draft_hidden_when_no_draft() {
     assert!(!should_show_pending_draft(false, None, Some("chat-1")));
 }
+
 #[test]
 fn pending_draft_hidden_when_no_session() {
     assert!(!should_show_pending_draft(false, Some("chat-1"), None));
 }
+
 #[test]
 fn stale_cache_with_new_measurements_schedules_save() {
     let entry = HeightCacheEntry {
@@ -189,6 +213,7 @@ fn stale_cache_with_new_measurements_schedules_save() {
         false
     ));
 }
+
 #[test]
 fn complete_cache_with_new_measurements_does_not_schedule_save() {
     let entry = HeightCacheEntry {
@@ -205,10 +230,12 @@ fn complete_cache_with_new_measurements_does_not_schedule_save() {
         false
     ));
 }
+
 #[test]
 fn no_cache_with_new_measurements_does_not_schedule_save() {
     assert!(!should_schedule_height_cache_save(None, 6, true, false));
 }
+
 #[test]
 fn processing_frame_does_not_schedule_stale_cache_save() {
     let entry = HeightCacheEntry {
@@ -225,6 +252,7 @@ fn processing_frame_does_not_schedule_stale_cache_save() {
         true
     ));
 }
+
 #[test]
 fn complete_cache_without_new_measurements_does_not_schedule_save() {
     let entry = HeightCacheEntry {

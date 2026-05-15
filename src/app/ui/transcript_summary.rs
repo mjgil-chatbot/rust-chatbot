@@ -1,10 +1,12 @@
 use std::borrow::Cow;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StandardTranscriptSplit {
     pub transcript: String,
     pub markdown_body: String,
     pub line_count: usize,
 }
+
 pub(crate) fn split_standard_transcript_and_markdown(
     content: &str,
 ) -> Option<StandardTranscriptSplit> {
@@ -29,6 +31,7 @@ pub(crate) fn split_standard_transcript_and_markdown(
         line_count: transcript_line_count,
     })
 }
+
 pub(crate) fn hard_break_standard_transcript_lines(content: &str) -> Cow<'_, str> {
     let transcript_lines = leading_standard_transcript_line_count(content);
 
@@ -52,6 +55,7 @@ pub(crate) fn hard_break_standard_transcript_lines(content: &str) -> Cow<'_, str
     }
     Cow::Owned(normalized)
 }
+
 fn leading_standard_transcript_line_count(content: &str) -> usize {
     content
         .lines()
@@ -61,6 +65,7 @@ fn leading_standard_transcript_line_count(content: &str) -> usize {
         })
         .count()
 }
+
 fn escape_transcript_markdown_line(line: &str) -> String {
     let chars: Vec<char> = line.chars().collect();
     let mut escaped = String::with_capacity(line.len() + 8);
@@ -93,6 +98,7 @@ fn escape_transcript_markdown_line(line: &str) -> String {
 
     escaped
 }
+
 fn is_standard_markdown_transcript_line(line: &str) -> bool {
     let stripped = strip_standard_transcript_timestamp_prefix(line);
     if stripped.len() != line.len() {
@@ -106,6 +112,7 @@ fn is_standard_markdown_transcript_line(line: &str) -> bool {
     }
     false
 }
+
 fn strip_standard_transcript_timestamp_prefix(line: &str) -> &str {
     let bytes = line.as_bytes();
     if bytes.len() < 16 || bytes[0] != b'[' {
@@ -142,6 +149,7 @@ fn strip_standard_transcript_timestamp_prefix(line: &str) -> &str {
     }
     &line[index + 10..]
 }
+
 fn looks_like_standard_model_label(label: &str) -> bool {
     if label.is_empty()
         || label.len() > 24
@@ -160,4 +168,108 @@ fn looks_like_standard_model_label(label: &str) -> bool {
         ]
         .iter()
         .any(|token| lower.contains(token))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        hard_break_standard_transcript_lines, split_standard_transcript_and_markdown,
+        StandardTranscriptSplit,
+    };
+
+    #[test]
+    fn split_standard_transcript_and_markdown_extracts_leading_transcript() {
+        assert_eq!(
+            split_standard_transcript_and_markdown(
+                "[May 19 01:28am] GPT-5.4 | Bash `pwd`\n[May 19 01:28am] GPT-5.4 | Bash `uname -a`\n\n## Summary\n- item"
+            ),
+            Some(StandardTranscriptSplit {
+                transcript: "[May 19 01:28am] GPT-5.4 | Bash `pwd`\n[May 19 01:28am] GPT-5.4 | Bash `uname -a`".to_string(),
+                markdown_body: "## Summary\n- item".to_string(),
+                line_count: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn split_standard_transcript_and_markdown_keeps_tool_calls_and_text_deltas_together() {
+        assert_eq!(
+            split_standard_transcript_and_markdown(
+                "[May 19 01:28am] GPT-5.4 agent started\n[May 19 01:28am] GPT-5.4 | Bash `sed -n '1,260p' src/snapshot.rs`\n[May 19 01:28am] I’ll inspect the architecture docs before editing.\n\n## Summary\n- fixed"
+            ),
+            Some(StandardTranscriptSplit {
+                transcript: "[May 19 01:28am] GPT-5.4 agent started\n[May 19 01:28am] GPT-5.4 | Bash `sed -n '1,260p' src/snapshot.rs`\n[May 19 01:28am] I’ll inspect the architecture docs before editing.".to_string(),
+                markdown_body: "## Summary\n- fixed".to_string(),
+                line_count: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn split_standard_transcript_and_markdown_ignores_transcript_only_content() {
+        assert_eq!(
+            split_standard_transcript_and_markdown(
+                "[May 19 01:28am] GPT-5.4 | Bash `pwd`\n[May 19 01:28am] GPT-5.4 | Bash `uname -a`"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn hard_break_standard_transcript_lines_preserves_markdown_newlines() {
+        assert_eq!(
+            hard_break_standard_transcript_lines(
+                "[May 19 12:02am] MM-2.7 agent started\n[May 19 12:02am] MM-2.7 | Bash `pwd`\n\n## Summary\n- item"
+            )
+            .as_ref(),
+            "[May 19 12:02am] MM-2.7 agent started  \n[May 19 12:02am] MM-2.7 | Bash `pwd`  \n\n## Summary\n- item"
+        );
+    }
+
+    #[test]
+    fn hard_break_standard_transcript_lines_escapes_markdown_hazards_outside_code() {
+        assert_eq!(
+            hard_break_standard_transcript_lines(
+                "[May 23 06:34pm] GPT-5.4 | Tool | <!-- SPDX-License-Identifier: MPL-2.0 -->\n[May 23 06:34pm] The runtime is missing wasm_loader helpers.\n\n## Summary\n- item"
+            )
+            .as_ref(),
+            "[May 23 06:34pm] GPT-5.4 | Tool | \\<!-- SPDX-License-Identifier: MPL-2.0 --\\>  \n[May 23 06:34pm] The runtime is missing wasm\\_loader helpers.  \n\n## Summary\n- item"
+        );
+    }
+
+    #[test]
+    fn hard_break_standard_transcript_lines_preserves_inline_code_content() {
+        assert_eq!(
+            hard_break_standard_transcript_lines(
+                "[May 23 06:34pm] GPT-5.4 | Bash `python -c \"print(alpha_beta < gamma)\"`\n\n## Summary\n- item"
+            )
+            .as_ref(),
+            "[May 23 06:34pm] GPT-5.4 | Bash `python -c \"print(alpha_beta < gamma)\"`  \n\n## Summary\n- item"
+        );
+    }
+
+    #[test]
+    fn hard_break_standard_transcript_lines_escapes_emphasis_markers_in_narrative_rows() {
+        assert_eq!(
+            hard_break_standard_transcript_lines(
+                "[May 23 06:34pm] I saw *alpha* and __beta__ in the raw output.\n\n## Summary\n- item"
+            )
+            .as_ref(),
+            "[May 23 06:34pm] I saw \\*alpha\\* and \\_\\_beta\\_\\_ in the raw output.  \n\n## Summary\n- item"
+        );
+    }
+
+    #[test]
+    fn split_standard_transcript_and_markdown_accepts_generic_tool_rows() {
+        assert_eq!(
+            split_standard_transcript_and_markdown(
+                "[May 23 06:34pm] GPT-5.4 | Tool | /workspace/bin/semble\n[May 23 06:34pm] GPT-5.4 | Tool | <!-- SPDX-License-Identifier: MPL-2.0 -->\n\n## Summary\n- item"
+            ),
+            Some(StandardTranscriptSplit {
+                transcript: "[May 23 06:34pm] GPT-5.4 | Tool | /workspace/bin/semble\n[May 23 06:34pm] GPT-5.4 | Tool | <!-- SPDX-License-Identifier: MPL-2.0 -->".to_string(),
+                markdown_body: "## Summary\n- item".to_string(),
+                line_count: 2,
+            })
+        );
+    }
 }
