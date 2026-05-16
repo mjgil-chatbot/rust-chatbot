@@ -4,12 +4,14 @@ pub(crate) fn extract_continue_id(content: &str) -> Option<String> {
         .find_map(extract_continue_id_from_line)
         .map(str::to_string)
 }
+
 pub(crate) fn is_forge_plaintext_response(content: &str) -> bool {
     let content = sanitize_stream_plaintext(content);
     content
         .lines()
         .any(|line| is_transcript_status_line(line.trim_start()))
 }
+
 pub(crate) fn sanitize_stream_plaintext(content: &str) -> String {
     let mut sanitized_lines = Vec::new();
 
@@ -24,6 +26,7 @@ pub(crate) fn sanitize_stream_plaintext(content: &str) -> String {
 
     sanitized_lines.join("\n")
 }
+
 pub(crate) fn transcript_preamble(content: &str) -> Option<String> {
     let sanitized = sanitize_stream_plaintext(content);
     let mut transcript_lines = Vec::new();
@@ -36,6 +39,7 @@ pub(crate) fn transcript_preamble(content: &str) -> Option<String> {
     }
     (!transcript_lines.is_empty()).then(|| transcript_lines.join("\n"))
 }
+
 fn extract_continue_id_from_line(line: &str) -> Option<&str> {
     let trimmed = line.trim();
     let marker = "] Continue ";
@@ -43,23 +47,28 @@ fn extract_continue_id_from_line(line: &str) -> Option<&str> {
     let continue_id = suffix.split_whitespace().next()?;
     is_probable_continue_id(continue_id).then_some(continue_id)
 }
+
 fn is_probable_continue_id(value: &str) -> bool {
     value.len() >= 8 && value.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '-')
 }
+
 fn is_transcript_status_line(line: &str) -> bool {
     line.starts_with("● [")
         || line.starts_with("○ [")
         || line.starts_with("◦ [")
         || line.starts_with("• [")
 }
+
 fn split_control_lines(content: &str) -> impl Iterator<Item = &str> {
     content.split(['\n', '\r'])
 }
+
 fn is_spinner_status_line(line: &str) -> bool {
     line.contains("Ctrl+C to interrupt")
         || line.starts_with("Migrating credentials ")
         || line.starts_with("Analyzing ")
 }
+
 fn trim_stream_prefix_artifacts(line: &str) -> &str {
     let trimmed = line.trim_start();
     let Some(first) = trimmed.chars().next() else {
@@ -73,6 +82,7 @@ fn trim_stream_prefix_artifacts(line: &str) -> &str {
         trimmed
     }
 }
+
 fn normalize_plaintext_line(line: &str) -> String {
     let mut normalized = String::with_capacity(line.len());
     for ch in line.chars() {
@@ -89,6 +99,7 @@ fn normalize_plaintext_line(line: &str) -> String {
         normalized
     }
 }
+
 fn map_plaintext_glyph(ch: char) -> char {
     match ch {
         '─' | '━' | '┄' | '┅' | '┈' | '┉' | '╌' | '╍' | '═' => '-',
@@ -103,6 +114,7 @@ fn map_plaintext_glyph(ch: char) -> char {
         _ => ch,
     }
 }
+
 fn strip_ansi_sequences(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let bytes = content.as_bytes();
@@ -156,4 +168,90 @@ fn strip_ansi_sequences(content: &str) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        extract_continue_id, is_forge_plaintext_response, sanitize_stream_plaintext,
+        transcript_preamble,
+    };
+
+    #[test]
+    fn extracts_continue_id_from_forge_status_line() {
+        let content = "● [00:52:32] Continue 9c58fe00-d47b-4b45-8faa-d2d908100bce";
+        assert_eq!(
+            extract_continue_id(content).as_deref(),
+            Some("9c58fe00-d47b-4b45-8faa-d2d908100bce")
+        );
+    }
+
+    #[test]
+    fn ignores_non_continue_lines() {
+        assert_eq!(extract_continue_id("plain assistant reply"), None);
+    }
+
+    #[test]
+    fn detects_plaintext_forge_transcript_lines() {
+        assert!(is_forge_plaintext_response(
+            "● [00:52:45] Execute [/bin/bash] ls -la crates/"
+        ));
+    }
+
+    #[test]
+    fn ignores_regular_markdown_messages() {
+        assert!(!is_forge_plaintext_response("## Heading\n\n- item"));
+    }
+
+    #[test]
+    fn strips_ansi_and_spinner_lines_from_plaintext_stream() {
+        let content = "\u{1b}[2K⠋ Migrating credentials 00s · Ctrl+C to interrupt\r\u{1b}[2K⠙ Analyzing 01s · Ctrl+C to interrupt\r● [00:52:32] Continue 9c58fe00-d47b-4b45-8faa-d2d908100bce\rActual line";
+        assert_eq!(
+            sanitize_stream_plaintext(content),
+            "● [00:52:32] Continue 9c58fe00-d47b-4b45-8faa-d2d908100bce\nActual line"
+        );
+    }
+
+    #[test]
+    fn strips_private_use_glyphs_and_box_drawing_rules() {
+        let content = "• \u{e640} Tier 1: Complete the Term Model\n────────────────────";
+        assert_eq!(
+            sanitize_stream_plaintext(content),
+            "•  Tier 1: Complete the Term Model\n---"
+        );
+    }
+
+    #[test]
+    fn converts_box_drawing_tables_to_ascii() {
+        let content = "┌───────┬────────┐\n│ Phase │ Focus  │\n└───────┴────────┘";
+        assert_eq!(
+            sanitize_stream_plaintext(content),
+            "+-------+--------+\n| Phase | Focus  |\n+-------+--------+"
+        );
+    }
+
+    #[test]
+    fn sanitizes_full_muse_transcript_with_table_and_fenced_code() {
+        let content = "● [03:11:37] MUSE [Agent] Create a concise rollout plan\n● [03:11:39] Read README.md\nThe muse agent completed the task.\n┌───────┬────────┐\n│ Phase │ Focus  │\n└───────┴────────┘\n```rust\nfn main() {}\n```";
+        assert_eq!(
+            sanitize_stream_plaintext(content),
+            "● [03:11:37] MUSE [Agent] Create a concise rollout plan\n● [03:11:39] Read README.md\nThe muse agent completed the task.\n+-------+--------+\n| Phase | Focus  |\n+-------+--------+\n```rust\nfn main() {}\n```"
+        );
+    }
+
+    #[test]
+    fn extracts_transcript_preamble_from_streamed_plaintext() {
+        let content = "● [03:11:37] MUSE [Agent] Create a concise rollout plan\n● [03:11:39] Read README.md\n## Summary\n- item";
+        assert_eq!(
+            transcript_preamble(content).as_deref(),
+            Some(
+                "● [03:11:37] MUSE [Agent] Create a concise rollout plan\n● [03:11:39] Read README.md"
+            )
+        );
+    }
+
+    #[test]
+    fn transcript_preamble_ignores_plain_markdown_without_status_lines() {
+        assert_eq!(transcript_preamble("## Summary\n- item"), None);
+    }
 }
