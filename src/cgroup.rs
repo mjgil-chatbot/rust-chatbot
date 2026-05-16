@@ -30,14 +30,18 @@
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
 /// Hard memory ceiling for the cgroup. When the cgroup's physical memory
 /// usage hits this, the OOM killer targets the entire cgroup unit.
 pub const CGROUP_MEMORY_MAX: &str = "9G";
+
 /// Pressure throttle point. The kernel begins reclaiming memory aggressively
 /// at this level, before hitting the hard MemoryMax.
 pub const CGROUP_MEMORY_HIGH: &str = "8G";
+
 /// Maximum processes/threads allowed inside the cgroup scope.
 pub const CGROUP_TASKS_MAX: u64 = 256;
+
 #[cfg(unix)]
 pub fn wrap_command(input: &mut Command) {
     let program = input.get_program().to_string_lossy().into_owned();
@@ -103,5 +107,16 @@ pub fn wrap_command(input: &mut Command) {
 
     *input = cmd;
 }
+
 #[cfg(not(unix))]
 pub fn wrap_command(_input: &mut Command) {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn constants_are_documented() {
+        assert_eq!(super::CGROUP_MEMORY_MAX, "9G");
+        assert_eq!(super::CGROUP_MEMORY_HIGH, "8G");
+        assert_eq!(super::CGROUP_TASKS_MAX, 256);
+    }
+}
