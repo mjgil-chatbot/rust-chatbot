@@ -9,9 +9,28 @@ pub use chatbot_worker_core::{
     provider_bridge, provider_catalog, storage, stream, summary, sync, worker, worker_ext,
     worker_process, workspace, AgentRole, AutonomousExecutionEnvironment, TEST_ENV_LOCK,
 };
+
 pub mod cgroup;
 pub mod memory_audit;
 pub mod memory_job;
 pub mod memory_mcp;
 pub mod process_limits;
 pub mod session_mcp;
+
+#[cfg(test)]
+mod cap_tests {
+    use cap::Cap;
+    use std::alloc;
+
+    const TEST_ALLOCATION_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+
+    #[global_allocator]
+    static TEST_ALLOCATOR: Cap<alloc::System> =
+        Cap::new(alloc::System, TEST_ALLOCATION_LIMIT_BYTES);
+
+    #[test]
+    fn small_allocations_fit_under_test_cap() {
+        let bytes: Vec<u8> = std::iter::repeat(0_u8).take(16 * 1024).collect();
+        assert_eq!(bytes.len(), 16 * 1024);
+    }
+}
