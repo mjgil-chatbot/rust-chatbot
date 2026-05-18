@@ -304,4 +304,164 @@ fn reexec_with_provider_argv0(provider: ModelProvider, instance: Option<u32>) {
 }
 #[cfg(not(target_os = "linux"))]
 fn reexec_with_provider_argv0(_provider: ModelProvider, _instance: Option<u32>) {}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_args_reads_window_geometry_flags() {
+        let args = vec![
+            "rust-chatbot".to_string(),
+            "--codex".to_string(),
+            "--instance".to_string(),
+            "3".to_string(),
+            "--window-x".to_string(),
+            "120".to_string(),
+            "--window-y".to_string(),
+            "80".to_string(),
+            "--window-width".to_string(),
+            "1110".to_string(),
+            "--window-height".to_string(),
+            "720".to_string(),
+        ];
+
+        let parsed = parse_args_from(args);
+
+        assert_eq!(parsed.provider, ModelProvider::Codex);
+        assert_eq!(parsed.instance, Some(3));
+        assert_eq!(
+            parsed.window_geometry,
+            WindowGeometry {
+                x: Some(120),
+                y: Some(80),
+                width: Some(1110.0),
+                height: Some(720.0),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_args_ignores_invalid_window_geometry_flags() {
+        let args = vec![
+            "rust-chatbot".to_string(),
+            "--window-x".to_string(),
+            "abc".to_string(),
+            "--window-height".to_string(),
+            "0".to_string(),
+        ];
+
+        let parsed = parse_args_from(args);
+
+        assert_eq!(parsed.window_geometry, WindowGeometry::default());
+    }
+
+    #[test]
+    fn parse_args_recognizes_supported_provider_flags() {
+        for provider in ModelProvider::LAUNCHABLE {
+            let parsed = parse_args_from(vec![
+                "rust-chatbot".to_string(),
+                format!("--{}", provider.as_str()),
+            ]);
+
+            assert_eq!(parsed.provider, provider);
+        }
+    }
+
+    #[test]
+    fn parse_args_accepts_supported_provider_names_and_aliases() {
+        for provider in ModelProvider::LAUNCHABLE {
+            let parsed = parse_args_from(vec![
+                "rust-chatbot".to_string(),
+                "--provider".to_string(),
+                provider.as_str().to_uppercase(),
+            ]);
+
+            assert_eq!(parsed.provider, provider);
+        }
+    }
+
+    #[test]
+    fn parse_args_accepts_supported_provider_equals_flags() {
+        for provider in ModelProvider::LAUNCHABLE {
+            let parsed = parse_args_from(vec![
+                "rust-chatbot".to_string(),
+                format!("--provider={}", provider.as_str()),
+            ]);
+
+            assert_eq!(parsed.provider, provider);
+        }
+    }
+
+    #[test]
+    fn parse_args_accepts_supported_backend_equals_flags() {
+        for provider in ModelProvider::LAUNCHABLE {
+            let parsed = parse_args_from(vec![
+                "rust-chatbot".to_string(),
+                format!("--backend={}", provider.as_str()),
+            ]);
+
+            assert_eq!(parsed.provider, provider);
+        }
+    }
+
+    #[test]
+    fn parse_args_uses_supplied_default_provider_when_no_provider_flag_is_present() {
+        let parsed =
+            parse_args_from_with_default(vec!["rust-chatbot".to_string()], ModelProvider::MiniMax);
+
+        assert_eq!(parsed.provider, ModelProvider::MiniMax);
+    }
+
+    #[test]
+    fn parse_args_explicit_provider_overrides_supplied_default_provider() {
+        let parsed = parse_args_from_with_default(
+            vec!["rust-chatbot".to_string(), "--codex".to_string()],
+            ModelProvider::MiniMax,
+        );
+
+        assert_eq!(parsed.provider, ModelProvider::Codex);
+    }
+
+    #[test]
+    fn parse_args_invalid_provider_value_resets_to_supplied_default_provider() {
+        let parsed = parse_args_from_with_default(
+            vec![
+                "rust-chatbot".to_string(),
+                "--codex".to_string(),
+                "--provider".to_string(),
+                "does-not-exist".to_string(),
+            ],
+            ModelProvider::MiniMax,
+        );
+
+        assert_eq!(parsed.provider, ModelProvider::MiniMax);
+    }
+
+    #[test]
+    fn parse_args_missing_provider_value_resets_to_supplied_default_provider() {
+        let parsed = parse_args_from_with_default(
+            vec![
+                "rust-chatbot".to_string(),
+                "--codex".to_string(),
+                "--provider".to_string(),
+            ],
+            ModelProvider::MiniMax,
+        );
+
+        assert_eq!(parsed.provider, ModelProvider::MiniMax);
+    }
+
+    #[test]
+    fn resolve_default_provider_accepts_aliases() {
+        assert_eq!(resolve_default_provider("MINIMAX"), ModelProvider::MiniMax);
+    }
+
+    #[test]
+    fn resolve_default_provider_falls_back_to_codex_for_unknown_values() {
+        assert_eq!(
+            resolve_default_provider("does-not-exist"),
+            ModelProvider::Codex
+        );
+    }
+}
 fn main() {}
