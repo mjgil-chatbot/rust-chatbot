@@ -2,6 +2,10 @@
 
 pub mod chatbot_ui_actions;
 pub mod chatbot_ui_adapters;
+
+#[cfg(test)]
+mod adapter_tests;
+
 pub use chatbot_ui_actions::AppStateUiActions;
 pub use chatbot_ui_adapters::{
     AppModelCatalog,
