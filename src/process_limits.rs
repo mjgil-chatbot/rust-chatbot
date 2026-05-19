@@ -1,6 +1,8 @@
 use std::env;
+
 pub const DEFAULT_PROCESS_MEMORY_LIMIT_BYTES: u64 = 9 * 1024 * 1024 * 1024;
 pub const PROCESS_MEMORY_LIMIT_BYTES_ENV: &str = "RUST_CHATBOT_PROCESS_MEMORY_LIMIT_BYTES";
+
 pub fn apply_default_process_memory_limit(process_name: &str) {
     let Some(limit_bytes) = configured_process_memory_limit_bytes() else {
         return;
@@ -12,6 +14,7 @@ pub fn apply_default_process_memory_limit(process_name: &str) {
         );
     }
 }
+
 fn configured_process_memory_limit_bytes() -> Option<u64> {
     let Some(raw) = env::var_os(PROCESS_MEMORY_LIMIT_BYTES_ENV) else {
         return Some(DEFAULT_PROCESS_MEMORY_LIMIT_BYTES);
@@ -41,6 +44,7 @@ fn configured_process_memory_limit_bytes() -> Option<u64> {
         }
     }
 }
+
 #[cfg(unix)]
 fn apply_process_memory_limit_bytes(limit_bytes: u64) -> std::io::Result<()> {
     let limit = libc::rlimit {
@@ -54,7 +58,45 @@ fn apply_process_memory_limit_bytes(limit_bytes: u64) -> std::io::Result<()> {
         Err(std::io::Error::last_os_error())
     }
 }
+
 #[cfg(not(unix))]
 fn apply_process_memory_limit_bytes(_limit_bytes: u64) -> std::io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_limit_defaults_to_nine_gib() {
+        let _env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var(PROCESS_MEMORY_LIMIT_BYTES_ENV);
+        assert_eq!(
+            configured_process_memory_limit_bytes(),
+            Some(DEFAULT_PROCESS_MEMORY_LIMIT_BYTES)
+        );
+    }
+
+    #[test]
+    fn configured_limit_can_be_disabled_with_zero() {
+        let _env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var(PROCESS_MEMORY_LIMIT_BYTES_ENV, "0");
+        assert_eq!(configured_process_memory_limit_bytes(), None);
+        std::env::remove_var(PROCESS_MEMORY_LIMIT_BYTES_ENV);
+    }
+
+    #[test]
+    fn configured_limit_accepts_override() {
+        let _env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var(PROCESS_MEMORY_LIMIT_BYTES_ENV, "123456");
+        assert_eq!(configured_process_memory_limit_bytes(), Some(123456));
+        std::env::remove_var(PROCESS_MEMORY_LIMIT_BYTES_ENV);
+    }
 }
