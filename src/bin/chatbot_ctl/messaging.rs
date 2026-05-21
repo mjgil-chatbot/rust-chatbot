@@ -283,3 +283,133 @@ fn parse_wmctrl_lp_for_pid(output: &str, pid: u32) -> Option<String> {
 
     None
 }
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_wmctrl_lp_g_extracts_window_placements() {
+        let output = "\
+0x04800007  0  1234  10  20  1000  600  host  Claude\n\
+0x0500000a  -1  5678  30  40  1200  700  host  Codex\n";
+
+        let placements = parse_wmctrl_lp_g(output);
+
+        assert_eq!(
+            placements.get(&1234),
+            Some(&WindowPlacement {
+                desktop: 0,
+                x: 10,
+                y: 20,
+                width: 1000,
+                height: 600,
+            })
+        );
+        assert_eq!(
+            placements.get(&5678),
+            Some(&WindowPlacement {
+                desktop: -1,
+                x: 30,
+                y: 40,
+                width: 1200,
+                height: 700,
+            })
+        );
+    }
+
+    #[test]
+    fn strip_managed_window_args_replaces_previous_geometry_flags() {
+        let args = vec![
+            "--codex".to_string(),
+            "--instance".to_string(),
+            "3".to_string(),
+            "--window-x".to_string(),
+            "10".to_string(),
+            "--window-y".to_string(),
+            "20".to_string(),
+            "--window-width".to_string(),
+            "1000".to_string(),
+            "--window-height".to_string(),
+            "600".to_string(),
+        ];
+
+        assert_eq!(
+            strip_managed_window_args(&args),
+            vec![
+                "--codex".to_string(),
+                "--instance".to_string(),
+                "3".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_wmctrl_lp_for_pid_returns_matching_window_id() {
+        let output = "\
+0x04800007  0  1234  host  Claude\n\
+0x0500000a  1  5678  host  Codex\n";
+
+        assert_eq!(
+            parse_wmctrl_lp_for_pid(output, 5678),
+            Some("0x0500000a".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_helpers_accept_supported_provider_names_and_flags() {
+        for provider in ModelProvider::SUPPORTED {
+            assert_eq!(parse_provider_name(provider.as_str()), Some(provider));
+            assert_eq!(
+                parse_provider_name(&provider.as_str().to_uppercase()),
+                Some(provider)
+            );
+            assert_eq!(
+                parse_provider_flag(&format!("--{}", provider.as_str())),
+                Some(provider)
+            );
+            assert_eq!(
+                parse_provider_flag(&format!("--provider={}", provider.as_str())),
+                Some(provider)
+            );
+            assert_eq!(
+                parse_provider_flag(&format!("--backend={}", provider.as_str())),
+                Some(provider)
+            );
+        }
+    }
+
+    #[test]
+    fn provider_helpers_reject_disabled_provider_names_and_flags() {
+        assert_eq!(parse_provider_name("claude"), None);
+        assert_eq!(parse_provider_flag("--claude"), None);
+        assert_eq!(parse_provider_flag("--provider=gemini"), None);
+    }
+}
+#[cfg(all(test, not(target_os = "linux")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_lsof_cwd_output_extracts_working_directory() {
+        let output = "p71102\nfcwd\nn/workspace/rust-chatbot\n";
+
+        assert_eq!(
+            parse_lsof_cwd_output(output),
+            Some(PathBuf::from("/workspace/rust-chatbot"))
+        );
+    }
+
+    #[test]
+    fn parse_ps_command_args_skips_executable_path() {
+        let output = "/workspace/local/bin/rust-chatbot --codex --instance 3\n";
+
+        assert_eq!(
+            parse_ps_command_args(output),
+            Some(vec![
+                "--codex".to_string(),
+                "--instance".to_string(),
+                "3".to_string()
+            ])
+        );
+    }
+}
