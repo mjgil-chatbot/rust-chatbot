@@ -343,3 +343,5 @@ pub fn read_worker_state(chat_id: &str) -> WorkerJobSnapshot {
 }
 #[path = "support/mock_provider_server_helpers.rs"]
 mod helpers;
+#[path = "support/mock_provider_server_scripts.rs"]
+mod scripts;
