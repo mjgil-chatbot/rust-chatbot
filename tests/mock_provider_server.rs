@@ -341,3 +341,5 @@ pub fn read_worker_result(chat_id: &str) -> WorkerResult {
 pub fn read_worker_state(chat_id: &str) -> WorkerJobSnapshot {
     worker::read_job_state(chat_id).unwrap().unwrap()
 }
+#[path = "support/mock_provider_server_helpers.rs"]
+mod helpers;
