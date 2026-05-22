@@ -1,4 +1,5 @@
 use std::sync::mpsc::TryRecvError;
+
 use ai_history_core::{Actor, BranchId, CheckpointId, SessionId, TurnId};
 use ai_history_store::{
     CheckpointInfo as HistoryCheckpointInfo, ManifestInfo as HistoryManifestInfo, MessageRecord,
@@ -8,7 +9,9 @@ use ai_history_store::{
 use ai_history_ui_model::{
     BranchItem, BranchTimelineView, CheckpointItem, CheckpointListView, TimelineItem, TimelineView,
 };
+
 const HISTORY_PANEL_TURN_LIMIT: usize = 24;
+
 use self::history_maintenance::maintain_history_store;
 use self::history_support::{
     auto_turn_checkpoint_reason, checkpoint_display_name, display_history_session_title,
@@ -18,9 +21,11 @@ use self::history_support::{
 };
 use self::history_repo_capture::{build_checkpoint_manifest, load_checkpoint_repo_summaries};
 use self::history_sync::{backfill_missing_turn_checkpoints, reconcile_existing_turn};
+
 pub(crate) use self::history_repo_capture::{
     CheckpointRepoSummary, RepoPatchCaptureState, RepoPatchSummary,
 };
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct HistoryRequestKey {
     workspace_root: String,
@@ -29,11 +34,13 @@ pub(crate) struct HistoryRequestKey {
     chat_fingerprint: Option<u64>,
     force_create: bool,
 }
+
 #[derive(Clone, Debug)]
 struct HistoryRefreshRequest {
     key: HistoryRequestKey,
     chat: Option<ChatSession>,
 }
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HistorySnapshot {
     pub(crate) workspace_root: Option<String>,
@@ -51,15 +58,18 @@ pub(crate) struct HistorySnapshot {
     pub(crate) notice: Option<String>,
     pub(crate) error: Option<String>,
 }
+
 #[derive(Debug)]
 struct HistoryRefreshResult {
     key: HistoryRequestKey,
     snapshot: HistorySnapshot,
 }
+
 #[derive(Debug)]
 struct HistoryCheckpointResult {
     success_message: String,
 }
+
 #[derive(Debug, Default)]
 pub(crate) struct HistoryUiState {
     pub(crate) snapshot: HistorySnapshot,
@@ -72,6 +82,7 @@ pub(crate) struct HistoryUiState {
     pub(crate) checkpoint_in_flight: bool,
     checkpoint_rx: Option<mpsc::Receiver<Result<HistoryCheckpointResult, String>>>,
 }
+
 #[derive(Clone, Debug)]
 struct ParsedTurn {
     actor: Actor,
@@ -79,19 +90,22 @@ struct ParsedTurn {
     assistant_content: Option<String>,
     timestamp: String,
 }
+
 impl HistoryUiState {
     fn set_snapshot(&mut self, key: HistoryRequestKey, snapshot: HistorySnapshot) {
         self.last_request_key = Some(key);
         self.snapshot = snapshot;
-    }}
-impl HistoryUiState {
+    }
+
     fn reset_for_missing_workspace(&mut self) {
         self.last_request_key = None;
         self.snapshot = HistorySnapshot {
             notice: Some("Select a workspace to enable history.".to_string()),
             ..HistorySnapshot::default()
         };
-    }}
+    }
+}
+
 impl AppState {
     pub(crate) fn refresh_history(&mut self) {
         if cfg!(test) && self.session.ui_io.repaint_ctx.is_none() {
@@ -99,8 +113,8 @@ impl AppState {
         }
         self.session.history.last_request_key = None;
         self.poll_history_sync();
-    }}
-impl AppState {
+    }
+
     pub(crate) fn request_history_enable(&mut self) {
         let Some(workspace_root) = self.session.effective_workspace_dir() else {
             self.session.history.reset_for_missing_workspace();
@@ -113,8 +127,48 @@ impl AppState {
             key: history_request_key(&workspace_root, Some(&chat), true),
             chat: Some(chat),
         });
-    }}
-impl AppState {
+    }
+
+    pub(crate) fn spawn_history_checkpoint_async(&mut self, checkpoint_name: String) {
+        if self.session.history.checkpoint_in_flight {
+            return;
+        }
+
+        let Some(workspace_root) = self.session.effective_workspace_dir() else {
+            self.layout.status_feedback = Some(UiStatusFeedback {
+                at: Instant::now(),
+                is_error: true,
+                message: "History requires a workspace.".to_string(),
+            });
+            return;
+        };
+        let Some(chat) = self.session.current_session.clone() else {
+            self.layout.status_feedback = Some(UiStatusFeedback {
+                at: Instant::now(),
+                is_error: true,
+                message: "History requires an active chat.".to_string(),
+            });
+            return;
+        };
+
+        let repaint_ctx = self.session.ui_io.repaint_ctx.clone();
+        let (tx, rx) = mpsc::channel();
+        self.session.history.checkpoint_in_flight = true;
+        self.session.history.checkpoint_rx = Some(rx);
+
+        thread::spawn(move || {
+            let result = create_history_checkpoint(&workspace_root, &chat, &checkpoint_name)
+                .map(|created| HistoryCheckpointResult {
+                    success_message: format!("History checkpoint created: {}", created),
+                })
+                .map_err(|err| format!("{err:#}"));
+            let _ = tx.send(result);
+            if let Some(ctx) = repaint_ctx {
+                ctx.request_repaint();
+            }
+        });
+    }
+
     fn spawn_history_refresh_async(&mut self, request: HistoryRefreshRequest) {
         if self.session.history.refresh_in_flight {
             return;
@@ -139,8 +193,8 @@ impl AppState {
                 ctx.request_repaint();
             }
         });
-    }}
-impl AppState {
+    }
+
     fn drain_history_results(&mut self) {
         let refresh_result = self
             .session
@@ -237,8 +291,8 @@ impl AppState {
             }
             Some(Err(TryRecvError::Empty)) | None => {}
         }
-    }}
-impl AppState {
+    }
+
     fn poll_history_sync(&mut self) {
         if cfg!(test) && self.session.ui_io.repaint_ctx.is_none() {
             return;
@@ -272,14 +326,16 @@ impl AppState {
             key,
             chat: current_chat,
         });
-    }}
-impl AppState {
+    }
+
     fn current_history_chat_is_processing(&self) -> bool {
         let Some(chat_id) = self.session.current_session_id() else {
             return false;
         };
         self.worker.processing_chat_ids.contains(chat_id)
-    }}
+    }
+}
+
 fn history_request_key(
     workspace_root: &str,
     chat: Option<&ChatSession>,
@@ -293,6 +349,7 @@ fn history_request_key(
         force_create,
     }
 }
+
 fn load_history_snapshot(request: HistoryRefreshRequest) -> Result<HistorySnapshot> {
     let workspace_root = PathBuf::from(&request.key.workspace_root);
     let restored_from_backup = restore_history_store_if_needed(&workspace_root)?;
@@ -379,6 +436,7 @@ fn load_history_snapshot(request: HistoryRefreshRequest) -> Result<HistorySnapsh
 
     Ok(snapshot)
 }
+
 fn merge_history_notice(
     primary: Option<String>,
     secondary: impl Into<Option<String>>,
@@ -391,6 +449,7 @@ fn merge_history_notice(
         (None, other) => other,
     }
 }
+
 fn open_history_store(path: &Path, create_parent: bool) -> Result<SqliteStore> {
     if create_parent {
         if let Some(parent) = path.parent() {
@@ -399,6 +458,7 @@ fn open_history_store(path: &Path, create_parent: bool) -> Result<SqliteStore> {
     }
     Ok(SqliteStore::open(path)?)
 }
+
 fn sync_chat_history(
     store: &mut SqliteStore,
     workspace_root: &Path,
@@ -429,6 +489,7 @@ fn sync_chat_history(
         .get_session(session.id)?
         .ok_or_else(|| anyhow::anyhow!("history session disappeared after sync"))
 }
+
 fn append_missing_turns(
     store: &mut SqliteStore,
     workspace_root: &Path,
@@ -537,6 +598,7 @@ fn append_missing_turns(
 
     Ok(())
 }
+
 fn create_history_checkpoint(
     workspace_root: &str,
     chat: &ChatSession,
@@ -573,6 +635,7 @@ fn create_history_checkpoint(
 
     Ok(result)
 }
+
 fn create_turn_checkpoint(
     store: &mut SqliteStore,
     workspace_root: &Path,
@@ -591,6 +654,7 @@ fn create_turn_checkpoint(
     )?;
     Ok(())
 }
+
 fn create_checkpoint(
     store: &mut SqliteStore,
     workspace_root: &Path,
@@ -620,6 +684,7 @@ fn create_checkpoint(
     })?;
     Ok(checkpoint_id)
 }
+
 fn build_branch_view(
     store: &SqliteStore,
     session: &HistorySessionInfo,
@@ -642,6 +707,7 @@ fn build_branch_view(
     view.set_active(active_branch_id);
     Ok(view)
 }
+
 fn build_checkpoint_view(
     store: &SqliteStore,
     session: &HistorySessionInfo,
@@ -670,6 +736,7 @@ fn build_checkpoint_view(
     }
     Ok(view)
 }
+
 fn build_timeline_view(
     store: &SqliteStore,
     session: &HistorySessionInfo,
@@ -708,6 +775,7 @@ fn build_timeline_view(
     view.current_turn_id = view.items.last().map(|item| item.turn_id);
     Ok(view)
 }
+
 fn find_linked_history_session<'a>(
     sessions: &'a [HistorySessionInfo],
     chat_id: &str,
@@ -717,9 +785,11 @@ fn find_linked_history_session<'a>(
         .iter()
         .find(|session| session.title.starts_with(prefix.as_str()))
 }
+
 #[cfg(test)]
 #[path = "history_tests.rs"]
 mod history_tests;
+
 #[cfg(test)]
 #[path = "history_maintenance_tests.rs"]
 mod history_maintenance_tests;

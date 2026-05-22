@@ -10,20 +10,21 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
+
 use anyhow::Result;
 use rust_debug::tracing::{debug, error, info, warn};
+
 use crate::config;
 use crate::data::{ChatMessage, ChatSession, DataManager, SessionHeightCache, SessionInfo};
 use crate::markdown::MarkdownCache;
 use crate::memory;
 use crate::model::ModelProvider;
-use crate::socket::SocketHandle;
-use crate::socket::SyncEvent;
-use crate::socket::WireMessage;
+use crate::socket::{self, SocketHandle, SyncEvent, WireMessage};
 use crate::summary::{JsonSummary, JsonSummaryPreview};
 use crate::sync::SyncShm;
 use crate::worker::{self, WorkerResult, WorkerState};
 use crate::workspace;
+
 #[path = "state/background_timing.rs"]
 mod background_timing;
 #[path = "state/history_maintenance.rs"]
@@ -38,20 +39,27 @@ mod history_sync;
 mod ui_io;
 #[path = "state/ui_sync_async.rs"]
 mod ui_sync_async;
+
 pub(crate) use self::history_maintenance::human_bytes;
+
 use ui_io::{
     save_operation_label, update_message_request_metadata, PendingUiSend, UiIoResult,
     UiIoSaveOperation, UiIoState,
 };
+
 pub(crate) const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(200);
+// Preloading full sessions at startup retains large transcripts before the
+// user ever opens them. Keep startup residency pinned to the current session.
 const STARTUP_SESSION_PRELOAD_LIMIT: usize = 0;
 const PREALLOCATED_SESSION_POOL_SIZE: usize = 5;
+
 pub(crate) enum AppEvent {
     UiAction(AppUiAction),
     UiIo(UiIoResult),
     Sync(SyncEvent),
     WorkerDiscovery(DiscoveredWorkerJob),
 }
+
 #[derive(Debug)]
 pub(crate) enum AppUiAction {
     SubmitMessage,
@@ -75,6 +83,7 @@ pub(crate) enum AppUiAction {
         model_id: String,
     },
 }
+
 /// Main application state
 pub struct AppState {
     pub session: SessionState,
@@ -96,6 +105,7 @@ pub struct AppState {
     #[cfg(target_arch = "wasm32")]
     pub dialog_parent: Option<()>,
 }
+
 /// Wrapper for native window handle that implements HasWindowHandle + HasDisplayHandle
 /// for use with rfd::FileDialog::set_parent()
 #[cfg(not(target_arch = "wasm32"))]
@@ -103,6 +113,7 @@ pub struct DialogParent {
     window: raw_window_handle::RawWindowHandle,
     display: raw_window_handle::RawDisplayHandle,
 }
+
 #[cfg(not(target_arch = "wasm32"))]
 impl raw_window_handle::HasWindowHandle for DialogParent {
     fn window_handle(
@@ -111,6 +122,7 @@ impl raw_window_handle::HasWindowHandle for DialogParent {
         Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(self.window) })
     }
 }
+
 #[cfg(not(target_arch = "wasm32"))]
 impl raw_window_handle::HasDisplayHandle for DialogParent {
     fn display_handle(
@@ -119,12 +131,14 @@ impl raw_window_handle::HasDisplayHandle for DialogParent {
         Ok(unsafe { raw_window_handle::DisplayHandle::borrow_raw(self.display) })
     }
 }
+
 #[derive(Clone, Debug)]
 pub struct LayoutLogFeedback {
     pub at: Instant,
     pub success: bool,
     pub path: Option<std::path::PathBuf>,
 }
+
 #[derive(Clone, Debug)]
 pub struct HeightCacheScan {
     pub session_id: String,
@@ -133,6 +147,7 @@ pub struct HeightCacheScan {
     pub seeking_top: bool,
     pub at_end: bool,
 }
+
 /// Worker job data collected during background startup discovery.
 #[derive(Debug)]
 pub(crate) struct DiscoveredWorkerJob {
@@ -140,6 +155,7 @@ pub(crate) struct DiscoveredWorkerJob {
     pub(crate) response: String,
     pub(crate) result: Option<WorkerResult>,
 }
+
 #[derive(Debug)]
 pub(crate) struct PolledWorkerJob {
     pub(crate) job: worker::WorkerJobSnapshot,
@@ -149,30 +165,36 @@ pub(crate) struct PolledWorkerJob {
     pub(crate) worker_events: Vec<crate::stream::StreamEvent>,
     pub(crate) worker_events_offset: u64,
 }
+
 #[derive(Debug)]
 pub(crate) struct OrphanedLocalWorker {
     pub(crate) chat_id: String,
     pub(crate) error_message: String,
 }
+
 #[derive(Debug)]
 pub(crate) struct WorkerPollSnapshot {
     pub(crate) active_chat_ids: HashSet<String>,
     pub(crate) jobs: Vec<PolledWorkerJob>,
     pub(crate) orphaned_local_workers: Vec<OrphanedLocalWorker>,
 }
+
 pub(crate) struct SessionSearchResult {
     pub(crate) query: String,
     pub(crate) matched_session_ids: HashSet<String>,
 }
+
 pub(crate) struct WorkspaceCompletionResult {
     pub(crate) query: String,
     pub(crate) matches: Vec<String>,
 }
+
 pub(crate) struct HeightCacheLoadResult {
     pub(crate) request_id: u64,
     pub(crate) session_id: String,
     pub(crate) cache: Result<Option<SessionHeightCache>, String>,
 }
+
 pub(crate) enum PathResolutionRequest {
     ApplyWorkspaceInput {
         input: String,
@@ -194,20 +216,24 @@ pub(crate) enum PathResolutionRequest {
         replacement: String,
     },
 }
+
 pub(crate) struct PathResolutionResult {
     pub(crate) request_id: u64,
     pub(crate) request: PathResolutionRequest,
     pub(crate) normalized_path: Result<String, String>,
 }
+
 pub(crate) struct McpConfigStatusResult {
     pub(crate) request_id: u64,
     pub(crate) cache_key: String,
     pub(crate) fff_explicitly_configured: bool,
 }
+
 include!("state/session.rs");
 include!("state/worker.rs");
 include!("state/layout.rs");
 include!("state/history.rs");
+
 include!("state/session_runtime.rs");
 include!("state/process_state.rs");
 include!("state/messaging.rs");
@@ -217,6 +243,7 @@ include!("state/persistence.rs");
 include!("state/workspace.rs");
 include!("state/helpers.rs");
 include!("state/helpers_impl.rs");
+
 impl SessionState {
     fn new(provider: ModelProvider) -> Self {
         let workspace_snapshot =
@@ -276,7 +303,9 @@ impl SessionState {
             ui_io: UiIoState::new(),
             event_queue: VecDeque::new(),
         }
-    }}
+    }
+}
+
 impl AppWorkerState {
     fn new() -> Self {
         Self {
@@ -298,7 +327,9 @@ impl AppWorkerState {
             worker_poll_rx: None,
             locally_finalized_chat_ids: HashSet::new(),
         }
-    }}
+    }
+}
+
 impl LayoutState {
     fn new() -> Self {
         Self {
@@ -326,8 +357,157 @@ impl LayoutState {
             height_cache_scan: None,
             status_feedback: None,
         }
-    }}
+    }
+}
+
 impl AppState {
+    /// Create a new application state
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        provider: ModelProvider,
+        instance: Option<u32>,
+    ) -> Self {
+        info!(instance=?instance, "initializing app state");
+
+        // Initialize cross-instance sync (mmap)
+        let sync_shm = match SyncShm::open(provider) {
+            Ok(shm) => {
+                info!("sync shm initialized");
+                Some(shm)
+            }
+            Err(e) => {
+                error!(error=%e, "failed to initialize sync shm, cross-instance sync disabled");
+                None
+            }
+        };
+
+        // Initialize cross-instance sync (socket) — always succeeds,
+        // connection to the broker happens asynchronously with reconnect.
+        let (sync_socket, sync_events) = socket::start(cc.egui_ctx.clone());
+        info!("sync socket initialized (connecting in background)");
+
+        let mut app = Self {
+            session: SessionState::new(provider),
+            worker: AppWorkerState::new(),
+            layout: LayoutState::new(),
+            sync_shm,
+            sync_socket,
+            sync_events,
+            instance_number: instance,
+            dialog_parent: None,
+        };
+        app.session.ui_io.set_repaint_ctx(cc.egui_ctx.clone());
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+            if let (Ok(wh), Ok(dh)) = (cc.window_handle(), cc.display_handle()) {
+                app.dialog_parent = Some(DialogParent {
+                    window: wh.as_raw(),
+                    display: dh.as_raw(),
+                });
+            }
+        }
+
+        // Initialize data manager
+        match DataManager::new(provider) {
+            Ok(data_manager) => {
+                info!("data manager initialized");
+                if let Err(e) =
+                    data_manager.ensure_preallocated_sessions(PREALLOCATED_SESSION_POOL_SIZE)
+                {
+                    warn!(error=%e, "failed to prepare preallocated session pool");
+                }
+                app.session.data_manager = Some(data_manager);
+
+                // Load existing sessions
+                if let Err(e) = app.load_sessions() {
+                    error!(error=%e, "error loading sessions");
+                }
+
+                // Ensure we have a current session (create if needed)
+                if app.session.current_session.is_none() {
+                    if app.session.sessions.is_empty() {
+                        if let Err(e) =
+                            app.create_new_session(config::DEFAULT_SESSION_NAME.to_string(), None)
+                        {
+                            error!(error=%e, "error creating default session");
+                        }
+                    } else {
+                        // Sessions exist but none loaded - try loading the first one
+                        if let Err(e) = app.load_first_available_session() {
+                            error!(error=%e, "error loading first available session, creating new one");
+                            if let Err(e) = app
+                                .create_new_session(config::DEFAULT_SESSION_NAME.to_string(), None)
+                            {
+                                error!(error=%e, "error creating fallback session");
+                            }
+                        }
+                    }
+                }
+
+                if let Ok(session_id) = std::env::var("RUST_CHATBOT_START_SESSION_ID") {
+                    if !session_id.trim().is_empty() {
+                        if let Err(e) = app.load_session(session_id.trim()) {
+                            error!(error=%e, session_id=%session_id, "error loading startup override session");
+                        }
+                    }
+                }
+
+                app.backfill_all_workspace_memory_async();
+
+                if STARTUP_SESSION_PRELOAD_LIMIT > 0 && !app.session.sessions.is_empty() {
+                    app.preload_recent_sessions_in_background(STARTUP_SESSION_PRELOAD_LIMIT);
+                }
+            }
+            Err(e) => {
+                error!(error=%e, "error initializing data manager");
+                // Create a temporary session for this session only
+                app.session.current_session = Some(ChatSession {
+                    id: "temp".to_string(),
+                    name: "Temporary Session".to_string(),
+                    system_prompt: None,
+                    json_summary: None,
+                    claude_session_id: None,
+                    minimax_session_id: None,
+                    qwen_session_id: None,
+                    codex_session_id: None,
+                    nvidia_session_id: None,
+                    gemini_session_id: None,
+                    openrouter_session_id: None,
+                    omniforge_session_id: None,
+                    omniforge_model_id: None,
+                    kimi_session_id: None,
+                    opencode_session_id: None,
+                    hermes_session_id: None,
+                    forge_session_id: None,
+                    claw_session_id: None,
+                    launched_from: std::env::current_dir()
+                        .ok()
+                        .map(|p| p.to_string_lossy().into_owned()),
+                    runsc_dirs: Vec::new(),
+                    runsc_image: None,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                    messages: vec![crate::data::ChatMessage {
+                        content: config::TEMP_SESSION_MESSAGE.to_string(),
+                        is_user: false,
+                        timestamp: chrono::Utc::now(),
+                        command: None,
+                        retrieved_memory: None,
+                    }],
+                });
+            }
+        }
+
+        // Discover any workers that survived a previous UI restart — in the
+        // background so the window appears immediately.
+        app.discover_workers_in_background();
+        app.refresh_mcp_config_status_in_background();
+
+        app
+    }
+
     #[cfg(test)]
     pub(crate) fn new_for_tests(provider: ModelProvider) -> Self {
         let (_tx, rx) = mpsc::channel();
@@ -343,22 +523,22 @@ impl AppState {
         };
         state.refresh_mcp_config_status_in_background();
         state
-    }}
-impl AppState {
+    }
+
     fn next_height_cache_load_request_id(&mut self) -> u64 {
         self.session.latest_height_cache_load_request_id = self
             .session
             .latest_height_cache_load_request_id
             .saturating_add(1);
         self.session.latest_height_cache_load_request_id
-    }}
-impl AppState {
+    }
+
     fn next_mcp_config_request_id(&mut self) -> u64 {
         self.session.latest_mcp_config_request_id =
             self.session.latest_mcp_config_request_id.saturating_add(1);
         self.session.latest_mcp_config_request_id
-    }}
-impl AppState {
+    }
+
     pub(crate) fn refresh_mcp_config_status_in_background(&mut self) {
         let provider = self.session.provider;
         let mcp_json_path = provider_mcp_json_path(provider);
@@ -408,8 +588,8 @@ impl AppState {
                 }
             });
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn spawn_height_cache_load_for_session(&mut self, session_id: String) {
         let Some(data_manager) = self.session.data_manager.clone() else {
             return;
@@ -437,8 +617,8 @@ impl AppState {
                 ctx.request_repaint();
             }
         });
-    }}
-impl AppState {
+    }
+
     pub(crate) fn drain_height_cache_load_results(&mut self) {
         let Some(rx) = self.session.height_cache_load_rx.take() else {
             return;
@@ -462,8 +642,8 @@ impl AppState {
                 );
             }
         }
-    }}
-impl AppState {
+    }
+
     pub(crate) fn drain_mcp_config_status_results(&mut self) {
         let Some(rx) = self.session.mcp_config_status_rx.take() else {
             return;
@@ -492,8 +672,8 @@ impl AppState {
                 );
             }
         }
-    }}
-impl AppState {
+    }
+
     fn handle_height_cache_load_result(&mut self, result: HeightCacheLoadResult) {
         if result.request_id < self.session.latest_height_cache_load_request_id {
             return;
@@ -526,7 +706,9 @@ impl AppState {
                 );
             }
         }
-    }}
+    }
+}
+
 fn validate_height_cache_entries(cache: &mut SessionHeightCache, messages: &[ChatMessage]) {
     for entry in cache.widths.values_mut() {
         if entry.message_count == messages.len() && entry.row_heights.len() == messages.len() {
@@ -534,12 +716,14 @@ fn validate_height_cache_entries(cache: &mut SessionHeightCache, messages: &[Cha
         }
     }
 }
+
 fn provider_mcp_json_path(provider: ModelProvider) -> PathBuf {
     crate::provider_bridge::background_provider_overrides(provider)
         .mcp_json_path
         .or_else(|| std::env::var_os("RUST_CHATBOT_TEST_MCP_JSON_PATH").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from(config::mcp_json_path()))
 }
+
 fn read_explicit_mcp_server_configured(
     provider: ModelProvider,
     mcp_json_path: &Path,
@@ -555,6 +739,7 @@ fn read_explicit_mcp_server_configured(
         .and_then(|servers| servers.get(server_name))
         .is_some()
 }
+
 fn configured_provider_mcp_servers<'a>(
     parsed: &'a serde_json::Value,
     provider: ModelProvider,
@@ -571,6 +756,7 @@ fn configured_provider_mcp_servers<'a>(
         })
         .or_else(|| parsed.get("mcpServers").and_then(|value| value.as_object()))
 }
+
 fn provider_mcp_profile(provider: ModelProvider) -> Option<&'static str> {
     match provider {
         ModelProvider::Claude
@@ -590,6 +776,7 @@ fn provider_mcp_profile(provider: ModelProvider) -> Option<&'static str> {
         | ModelProvider::OpenCode => None,
     }
 }
+
 #[cfg(test)]
 #[path = "state/ui_spec_lifecycle_tests.rs"]
 mod ui_spec_lifecycle_tests;
