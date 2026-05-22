@@ -17,8 +17,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
 use chatbot_lib::worker::{self, WorkerJobSnapshot, WorkerRequest, WorkerResult};
 use serde_json::{json, Value};
+
+// ---------------------------------------------------------------------------
+// Environment variable names mirroring src/provider_bridge.rs test overrides
+// ---------------------------------------------------------------------------
+
 pub const TEST_PROVIDER_CLI_ENV: &str = "RUST_CHATBOT_TEST_PROVIDER_CLI";
 pub const TEST_PROVIDER_CONFIG_DIR_ENV: &str = "RUST_CHATBOT_TEST_PROVIDER_CONFIG_DIR";
 pub const TEST_ANTHROPIC_BASE_URL_ENV: &str = "RUST_CHATBOT_TEST_ANTHROPIC_BASE_URL";
@@ -28,10 +34,16 @@ pub const TEST_CLAUDE_JSON_PATH_ENV: &str = "RUST_CHATBOT_TEST_CLAUDE_JSON_PATH"
 pub const TEST_GEMINI_SETTINGS_PATH_ENV: &str = "RUST_CHATBOT_TEST_GEMINI_SETTINGS_PATH";
 pub const TEST_CODEX_TOML_PATH_ENV: &str = "RUST_CHATBOT_TEST_CODEX_TOML_PATH";
 pub const TEST_AGENT_ADAPTER_CLI_ENV: &str = "RUST_CHATBOT_AGENT_ADAPTER_CLI";
+
+// ---------------------------------------------------------------------------
+// TempDir: auto-cleaned directory for test isolation
+// ---------------------------------------------------------------------------
+
 #[derive(Debug)]
 pub struct TempDir {
     path: PathBuf,
 }
+
 impl TempDir {
     pub fn new(label: &str) -> Self {
         let nanos = SystemTime::now()
@@ -46,19 +58,27 @@ impl TempDir {
         ));
         fs::create_dir_all(&path).unwrap();
         Self { path }
-    }}
-impl TempDir {
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
-    }}
+    }
+}
+
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
     }
 }
+
+// ---------------------------------------------------------------------------
+// ScopedEnv: RAII-style environment variable overrides
+// ---------------------------------------------------------------------------
+
 pub struct ScopedEnv {
     saved: Vec<(String, Option<OsString>)>,
 }
+
 impl ScopedEnv {
     pub fn set<I, K, V>(pairs: I) -> Self
     where
@@ -73,7 +93,9 @@ impl ScopedEnv {
             std::env::set_var(&key, value);
         }
         Self { saved }
-    }}
+    }
+}
+
 impl Drop for ScopedEnv {
     fn drop(&mut self) {
         while let Some((key, value)) = self.saved.pop() {
@@ -84,11 +106,17 @@ impl Drop for ScopedEnv {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// ScenarioStep + RecordedRequest: scenario definition and request logging
+// ---------------------------------------------------------------------------
+
 #[derive(Clone, Debug)]
 pub struct ScenarioStep {
     pub name: &'static str,
     pub response: Value,
 }
+
 #[derive(Clone, Debug)]
 pub struct RecordedRequest {
     pub step: String,
@@ -96,22 +124,23 @@ pub struct RecordedRequest {
     pub auth_token: Option<String>,
     pub body: Value,
 }
+
 impl RecordedRequest {
     /// Returns the model sent in the request body.
     pub fn model(&self) -> Option<&str> {
         self.body.get("model").and_then(Value::as_str)
-    }}
-impl RecordedRequest {
+    }
+
     /// Returns the system prompt sent in the request body.
     pub fn system_prompt(&self) -> Option<&str> {
         self.body.get("system").and_then(Value::as_str)
-    }}
-impl RecordedRequest {
+    }
+
     /// Returns the resume_session_id sent in the request body.
     pub fn resume_session_id(&self) -> Option<&str> {
         self.body.get("resume_session_id").and_then(Value::as_str)
-    }}
-impl RecordedRequest {
+    }
+
     /// Returns the user query text from the first user message.
     pub fn user_query(&self) -> Option<&str> {
         self.body
@@ -121,21 +150,28 @@ impl RecordedRequest {
             .and_then(|c| c.get(0))
             .and_then(|c| c.get("text"))
             .and_then(Value::as_str)
-    }}
-impl RecordedRequest {
+    }
+
     /// Returns the tool_result_count from metadata.
     pub fn tool_result_count(&self) -> Option<u64> {
         self.body
             .get("metadata")
             .and_then(|m| m.get("tool_result_count"))
             .and_then(Value::as_u64)
-    }}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MockProviderServer: deterministic Anthropic-compatible HTTP backend
+// ---------------------------------------------------------------------------
+
 pub struct MockProviderServer {
     addr: SocketAddr,
     request_log: Arc<Mutex<Vec<RecordedRequest>>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
+
 impl MockProviderServer {
     /// Start a mock server that serves the given steps in order, recording
     /// each incoming request for later assertion.
@@ -188,27 +224,27 @@ impl MockProviderServer {
             stop,
             thread: Some(thread),
         }
-    }}
-impl MockProviderServer {
+    }
+
     pub fn base_url(&self) -> String {
         format!("http://{}/anthropic", self.addr)
-    }}
-impl MockProviderServer {
+    }
+
     /// Returns the recorded provider request log in arrival order.
     pub fn request_log(&self) -> Vec<RecordedRequest> {
         self.request_log.lock().unwrap().clone()
-    }}
-impl MockProviderServer {
+    }
+
     /// Returns a snapshot of all recorded requests in arrival order.
     pub fn requests(&self) -> Vec<RecordedRequest> {
         self.request_log()
-    }}
-impl MockProviderServer {
+    }
+
     /// Returns the number of requests received so far.
     pub fn request_count(&self) -> usize {
         self.request_log.lock().unwrap().len()
-    }}
-impl MockProviderServer {
+    }
+
     /// Returns the ordered step names of recorded requests.
     pub fn step_names(&self) -> Vec<String> {
         self.request_log
@@ -217,7 +253,9 @@ impl MockProviderServer {
             .iter()
             .map(|r| r.step.clone())
             .collect()
-    }}
+    }
+}
+
 impl Drop for MockProviderServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
@@ -226,11 +264,17 @@ impl Drop for MockProviderServer {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// HTTP request parser (minimal, for test use)
+// ---------------------------------------------------------------------------
+
 struct HttpRequest {
     path: String,
     headers: BTreeMap<String, String>,
     body: Vec<u8>,
 }
+
 fn read_http_request(stream: &mut TcpStream) -> HttpRequest {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut request_line = String::new();
@@ -267,15 +311,85 @@ fn read_http_request(stream: &mut TcpStream) -> HttpRequest {
         body,
     }
 }
+
+// ---------------------------------------------------------------------------
+// WorkerHarness: sets up a fully isolated test worker environment
+// ---------------------------------------------------------------------------
+
 pub struct WorkerHarness {
     pub _temp: TempDir,
     pub _env: ScopedEnv,
     pub fake_cli_path: PathBuf,
     pub config_dir: PathBuf,
 }
+
+impl WorkerHarness {
+    pub fn new(label: &str, server: &MockProviderServer) -> Self {
+        let temp = TempDir::new(label);
+        let home = temp.path().join("home");
+        let config_dir = home.join(".rust-chatbot").join(".minimax");
+        let missing_mcp = temp.path().join("missing.mcp.json");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&config_dir).unwrap();
+
+        let fake_cli_path = temp.path().join("fake_claude.py");
+        write_fake_claude_cli(&fake_cli_path);
+        let fake_adapter_path = temp.path().join("fake_agent_adapter_cli.sh");
+        write_fake_agent_adapter_cli(&fake_adapter_path);
+
+        let env = ScopedEnv::set([
+            ("HOME", home.into_os_string()),
+            (
+                TEST_PROVIDER_CLI_ENV,
+                fake_cli_path.clone().into_os_string(),
+            ),
+            (
+                TEST_PROVIDER_CONFIG_DIR_ENV,
+                config_dir.clone().into_os_string(),
+            ),
+            (
+                TEST_ANTHROPIC_BASE_URL_ENV,
+                OsString::from(server.base_url()),
+            ),
+            (
+                TEST_ANTHROPIC_AUTH_TOKEN_ENV,
+                OsString::from("parity-token"),
+            ),
+            ("MINIMAX_API_KEY", OsString::from("parity-token")),
+            ("ANTHROPIC_BASE_URL", OsString::from(server.base_url())),
+            ("ANTHROPIC_AUTH_TOKEN", OsString::from("parity-token")),
+            (
+                "AGENT_ADAPTER_MINIMAX_EXE",
+                fake_cli_path.clone().into_os_string(),
+            ),
+            (
+                "RUST_CHATBOT_MINIMAX_CHATBOT_ADAPTER",
+                fake_cli_path.clone().into_os_string(),
+            ),
+            (
+                TEST_AGENT_ADAPTER_CLI_ENV,
+                fake_adapter_path.into_os_string(),
+            ),
+            (TEST_MCP_JSON_PATH_ENV, missing_mcp.into_os_string()),
+        ]);
+
+        Self {
+            _temp: temp,
+            _env: env,
+            fake_cli_path,
+            config_dir,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Worker binary helpers
+// ---------------------------------------------------------------------------
+
 pub fn worker_binary() -> &'static str {
     env!("CARGO_BIN_EXE_chatbot-worker")
 }
+
 pub fn unique_chat_id(name: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -283,6 +397,7 @@ pub fn unique_chat_id(name: &str) -> String {
         .as_nanos();
     format!("parity-{name}-{}-{nanos}", std::process::id())
 }
+
 pub fn make_request(chat_id: &str, query: &str, resume_session_id: Option<&str>) -> WorkerRequest {
     WorkerRequest {
         provider: "minimax".to_string(),
@@ -299,6 +414,7 @@ pub fn make_request(chat_id: &str, query: &str, resume_session_id: Option<&str>)
         chat_id: chat_id.to_string(),
     }
 }
+
 pub fn spawn_worker(request: &WorkerRequest) -> Child {
     fs::create_dir_all(worker::worker_dir(&request.chat_id)).unwrap();
     worker::write_json_atomic(&worker::request_path(&request.chat_id), request).unwrap();
@@ -309,6 +425,7 @@ pub fn spawn_worker(request: &WorkerRequest) -> Child {
         .spawn()
         .unwrap()
 }
+
 pub fn wait_for_worker(mut child: Child) -> Output {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -322,6 +439,7 @@ pub fn wait_for_worker(mut child: Child) -> Output {
         thread::sleep(Duration::from_millis(20));
     }
 }
+
 pub fn wait_until<F>(timeout: Duration, mut predicate: F)
 where
     F: FnMut() -> bool,
@@ -335,13 +453,19 @@ where
     }
     panic!("condition was not satisfied before timeout");
 }
+
 pub fn read_worker_result(chat_id: &str) -> WorkerResult {
     serde_json::from_str(&fs::read_to_string(worker::result_path(chat_id)).unwrap()).unwrap()
 }
+
 pub fn read_worker_state(chat_id: &str) -> WorkerJobSnapshot {
     worker::read_job_state(chat_id).unwrap().unwrap()
 }
+
 #[path = "support/mock_provider_server_helpers.rs"]
 mod helpers;
 #[path = "support/mock_provider_server_scripts.rs"]
 mod scripts;
+
+pub use helpers::*;
+pub use scripts::*;
