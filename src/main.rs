@@ -15,7 +15,10 @@
 //! - `markdown` - Markdown rendering with table support
 
 use std::sync::Arc;
+
 use eframe::egui;
+
+// Re-export library modules so `crate::` paths work in binary-local modules.
 pub use chatbot_lib::config;
 pub use chatbot_lib::data;
 pub use chatbot_lib::debug;
@@ -30,8 +33,11 @@ pub use chatbot_lib::summary;
 pub use chatbot_lib::sync;
 pub use chatbot_lib::worker;
 pub use chatbot_lib::workspace;
+
 #[cfg(test)]
 pub(crate) use chatbot_lib::TEST_ENV_LOCK;
+
+// Binary-local modules (depend on egui/eframe).
 mod app;
 mod common;
 mod document;
@@ -39,21 +45,114 @@ mod forge_loop;
 mod inline;
 mod markdown;
 mod socket;
+
+use app::ui::{dialogs, history_panel, main_panel, side_panel};
+use app::AppState;
 use model::ModelProvider;
 use rust_debug::tracing::{error, info};
+
+impl eframe::App for AppState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check for response from provider CLI
+        self.check_for_response();
+
+        // Left panel for session management
+        side_panel::panel_config().show(ctx, |ui| {
+            side_panel::render(ui, self);
+        });
+
+        history_panel::panel_config().show(ctx, |ui| {
+            history_panel::render(ui, self);
+        });
+
+        // Main chat area
+        egui::CentralPanel::default().show(ctx, |ui| {
+            main_panel::render(ui, self);
+        });
+
+        // Dialogs
+        dialogs::render_new_session_dialog(ctx, self);
+        dialogs::render_rename_session_dialog(ctx, self);
+        history_panel::render_checkpoint_dialog(ctx, self);
+
+        // Keep worker-driven updates flowing, but do not spin the UI at
+        // full speed while waiting for the next polled worker update.
+        if let Some(repaint_after) = self.background_repaint_interval() {
+            ctx.request_repaint_after(repaint_after);
+        }
+    }
+}
+
+fn main() -> Result<(), eframe::Error> {
+    chatbot_lib::process_limits::apply_default_process_memory_limit("rust-chatbot");
+    apply_default_debug_env();
+    // Tracing file logging (daily rotation, size checks, cleanup)
+    let _log_guard = debug::init();
+    // Also enable all rust-debug namespaces + rolling log
+    let _debug_guard = rust_debug::init_debug_defaults("rust-chatbot");
+    rust_debug::install_panic_hook();
+    if let Some(exit_code) = memory_job::maybe_run_embedded_job_from_env() {
+        std::process::exit(exit_code);
+    }
+    chatbot_lib::ensure_path_symlink();
+    app::initialize_startup_storage();
+    info!("application start");
+
+    let cli = parse_args();
+    let provider = cli.provider;
+    let instance = cli.instance;
+    let window_geometry = cli.window_geometry;
+
+    reexec_with_provider_argv0(provider, instance);
+
+    let window_title = config::window_title(provider, instance);
+    let app_id = config::window_app_id(provider, instance);
+
+    let icon = icon_data(provider);
+    let auto_ui_background = config::auto_ui_launch_background_requested();
+
+    let options = eframe::NativeOptions {
+        viewport: window_geometry.apply_to_viewport(
+            egui::ViewportBuilder::default()
+                .with_app_id(app_id.clone())
+                .with_icon(icon)
+                .with_active(!auto_ui_background)
+                .with_min_inner_size([config::MIN_WINDOW_WIDTH, config::MIN_WINDOW_HEIGHT]),
+        ),
+        ..Default::default()
+    };
+
+    let result = eframe::run_native(
+        &window_title,
+        options,
+        Box::new(move |cc| Ok(Box::new(AppState::new(cc, provider, instance)))),
+    );
+
+    if let Err(ref err) = result {
+        error!(error=%err, "application exit with error");
+    } else {
+        info!("application exit");
+    }
+
+    result
+}
+
 fn apply_default_debug_env() {
     set_env_default("CLAUDE_LOG_STDERR", "1");
 }
+
 fn set_env_default(name: &str, value: &str) {
     if std::env::var_os(name).is_none() {
         std::env::set_var(name, value);
     }
 }
+
 struct CliArgs {
     provider: ModelProvider,
     instance: Option<u32>,
     window_geometry: WindowGeometry,
 }
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct WindowGeometry {
     x: Option<i32>,
@@ -61,6 +160,7 @@ struct WindowGeometry {
     width: Option<f32>,
     height: Option<f32>,
 }
+
 impl WindowGeometry {
     fn apply_to_viewport(self, mut viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
         if let (Some(x), Some(y)) = (self.x, self.y) {
@@ -71,7 +171,9 @@ impl WindowGeometry {
             self.width.unwrap_or(config::WINDOW_WIDTH),
             self.height.unwrap_or(config::WINDOW_HEIGHT),
         ])
-    }}
+    }
+}
+
 fn parse_provider_flag(arg: &str) -> Option<ModelProvider> {
     let Some(stripped) = arg.strip_prefix("--") else {
         return None;
@@ -86,9 +188,11 @@ fn parse_provider_flag(arg: &str) -> Option<ModelProvider> {
         ModelProvider::from_launch_alias(stripped)
     }
 }
+
 fn parse_args() -> CliArgs {
     parse_args_from_with_default(std::env::args(), configured_default_provider())
 }
+
 #[cfg(test)]
 fn parse_args_from<I>(args: I) -> CliArgs
 where
@@ -96,6 +200,7 @@ where
 {
     parse_args_from_with_default(args, ModelProvider::Codex)
 }
+
 fn parse_args_from_with_default<I>(args: I, default_provider: ModelProvider) -> CliArgs
 where
     I: IntoIterator<Item = String>,
@@ -172,9 +277,11 @@ where
         window_geometry,
     }
 }
+
 fn configured_default_provider() -> ModelProvider {
     resolve_default_provider(&config::config().provider.default_provider)
 }
+
 fn resolve_default_provider(provider_name: &str) -> ModelProvider {
     if let Some(provider) = ModelProvider::from_launch_alias(provider_name) {
         provider
@@ -186,6 +293,7 @@ fn resolve_default_provider(provider_name: &str) -> ModelProvider {
         ModelProvider::Codex
     }
 }
+
 fn parse_i32_flag_value(value: Option<String>, flag_name: &str) -> Option<i32> {
     let Some(value) = value else {
         eprintln!("Missing value for {}.", flag_name);
@@ -200,6 +308,7 @@ fn parse_i32_flag_value(value: Option<String>, flag_name: &str) -> Option<i32> {
         }
     }
 }
+
 fn parse_positive_f32_flag_value(value: Option<String>, flag_name: &str) -> Option<f32> {
     let Some(value) = value else {
         eprintln!("Missing value for {}.", flag_name);
@@ -214,6 +323,7 @@ fn parse_positive_f32_flag_value(value: Option<String>, flag_name: &str) -> Opti
         }
     }
 }
+
 fn print_provider_help() {
     println!(
         "Desktop Chat\n\n\
@@ -235,6 +345,7 @@ Options:\n\
   -h, --help               Show this help message\n"
     );
 }
+
 fn icon_data(provider: ModelProvider) -> Arc<egui::IconData> {
     let png_bytes: &[u8] = match provider {
         ModelProvider::Claude => include_bytes!("../assets/anthropic_logo.png"),
@@ -264,6 +375,7 @@ fn icon_data(provider: ModelProvider) -> Arc<egui::IconData> {
         height,
     })
 }
+
 #[cfg(target_os = "linux")]
 fn reexec_with_provider_argv0(provider: ModelProvider, instance: Option<u32>) {
     use std::ffi::OsString;
@@ -302,8 +414,10 @@ fn reexec_with_provider_argv0(provider: ModelProvider, instance: Option<u32>) {
         .exec();
     error!(error=%err, "failed to re-exec process with provider window class");
 }
+
 #[cfg(not(target_os = "linux"))]
 fn reexec_with_provider_argv0(_provider: ModelProvider, _instance: Option<u32>) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,4 +578,3 @@ mod tests {
         );
     }
 }
-fn main() {}
