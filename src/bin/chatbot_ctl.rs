@@ -27,12 +27,14 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+
 use anyhow::{Context, Result};
 use chatbot_lib::data::DataManager;
 use chatbot_lib::model::ModelProvider;
 use chatbot_lib::sync::{self, SyncShm};
 use chatbot_lib::worker::{self, WorkerJobSnapshot, WorkerRequest, WorkerState};
 use rust_debug::tracing::warn;
+
 include!("chatbot_ctl/helpers.rs");
 include!("chatbot_ctl/usage.rs");
 include!("chatbot_ctl/backup_scheduler.rs");
@@ -43,6 +45,8 @@ mod commands_gc_tests;
 include!("chatbot_ctl/broker.rs");
 include!("chatbot_ctl/messaging_send.rs");
 include!("chatbot_ctl/messaging.rs");
+#[cfg(test)]
+#[path = "chatbot_ctl/messaging_send_tests.rs"]
+mod messaging_send_tests;
 include!("chatbot_ctl/desktop.rs");
 include!("chatbot_ctl/database.rs");
-fn main() {}

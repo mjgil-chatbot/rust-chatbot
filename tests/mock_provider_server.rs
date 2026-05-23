@@ -188,6 +188,8 @@ impl MockProviderServer {
             while served < steps.len() && !stop_for_thread.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // Accepted sockets inherit O_NONBLOCK on macOS.
+                        stream.set_nonblocking(false).unwrap();
                         let request = read_http_request(&mut stream);
                         let step = &steps[served];
                         request_log_for_thread
@@ -469,3 +471,29 @@ mod scripts;
 
 pub use helpers::*;
 pub use scripts::*;
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+
+    #[test]
+    fn accepted_connection_waits_for_delayed_request_bytes() {
+        let server = MockProviderServer::start(vec![ScenarioStep {
+            name: "delayed-request",
+            response: json!({"ok": true}),
+        }]);
+        let mut client = TcpStream::connect(server.addr).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        // On macOS an accepted socket inherits the nonblocking listener flag.
+        // Let accept finish before sending any bytes, rather than racing it.
+        thread::sleep(Duration::from_millis(200));
+        client.write_all(b"POST /anthropic/v1/messages HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        assert_eq!(server.request_count(), 1);
+        assert_eq!(server.request_log()[0].body, json!({}));
+    }
+}
